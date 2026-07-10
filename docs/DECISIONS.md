@@ -1,0 +1,335 @@
+# Decisions
+
+Load-bearing choices, why they were made, and what would justify revisiting them.
+Written before implementation, so the rationale outlives the memory of the conversation.
+
+---
+
+## 1. Not VS Code
+
+The instinct is to fork VS Code or run code-server. The Claude Code extension *is*
+published to Open VSX, so this would work.
+
+It's the wrong product. VS Code's command palette, file tree, tab bar, and diff gutters
+all assume a mouse and roughly 1400 horizontal pixels. On a tablet it's tolerable; on a
+phone it's a demo you show once.
+
+The reframe: on a phone you are not typing code. You are directing an agent and reviewing
+its output. That's a chat pane, a diff reviewer, a terminal tail, and a preview — four
+surfaces that all work at 390px, and a far smaller thing to build.
+
+**Would change our mind:** never, for the phone. If a tablet-first mode became the
+priority, code-server is a real option again.
+
+---
+
+## 2. The extension is a reference design, not a dependency
+
+"All the features the Claude Code extension has" is reachable without the extension,
+because the extension is itself a UI over the same `query()` event stream we consume.
+
+Its diff-with-approve-reject is the `canUseTool` callback intercepting Edit/Write before it
+lands. Plan review mode is a message rendered as markdown. Parallel conversation tabs are
+multiple sessions. `@`-mentions are a file picker injecting paths into the prompt.
+
+Treat it as a very good spec, written by people who already made the mistakes.
+
+---
+
+## 3. Installed PWA, not native
+
+The three hardest surfaces — editor, terminal, preview — are all fundamentally web.
+CodeMirror and xterm.js are web components; the preview is a browser rendering a dev
+server. A React Native app would be native chrome around three WebViews: a better tab bar
+in exchange for a bridge across every interaction that matters.
+
+The usual native advantages don't apply. Background execution is unnecessary because the
+agent runs server-side. iOS has supported web push from home-screen-installed PWAs since
+16.4, which covers "your agent needs approval." App Store distribution is pure cost for a
+personal tool — signing, a developer account, TestFlight builds expiring every 90 days.
+
+A web client is needed for desktop regardless. One codebase.
+
+**Known weakness:** iOS Safari suspends backgrounded pages, killing the SSE connection.
+This is precisely what the event log and `Last-Event-ID` resume are for — see #5 and #6.
+
+**Reversible:** Capacitor wraps the same PWA for native push in roughly a day.
+
+---
+
+## 4. The agent runs inside the container
+
+Claude Code's tools — Read, Edit, Bash — are local filesystem operations. Co-locating the
+agent process with the repo makes them work by construction.
+
+The alternative, a control-plane server that shells into a remote box, means
+reimplementing a filesystem over RPC. The project would become that, instead of an editor.
+
+So the container holds the repo, the dev server, *and* the Node process hosting the Agent
+SDK.
+
+---
+
+## 5. The event log is the source of truth
+
+Every message from the SDK is appended to an append-only SQLite table with a monotonic
+`seq`. Nothing else on the server is durable.
+
+This is the decision the rest of the architecture hangs from:
+
+- **Reconnect is free.** The client is a view over a log with a cursor, not a WebSocket
+  peer. Phone backgrounding stops being an error case.
+- **Restart is always safe**, so restarting the server during development costs nothing.
+- **Every future table is a projection.** Sessions list, projects list, "what changed
+  Tuesday" — all reads over the log. You never migrate data, you write a new query.
+
+That last property is what makes "MVP and build up" honest rather than a euphemism for a
+rewrite in three months.
+
+**Corollary:** Claude's own `session_id` and our event log are *two different histories*.
+Claude's is its conversation context, used for `resume`. Ours is the render log for the
+UI, a superset holding approvals, file opens, and terminal output. Conflating them means
+reconstructing UI state from an LLM transcript.
+
+---
+
+## 6. SSE for the agent stream, WebSocket only for the terminal
+
+The reflex is WebSockets everywhere. It's wrong here.
+
+The agent stream is server-to-client only — prompts go up as ordinary POSTs. That's what
+Server-Sent Events are for. And SSE has a feature that maps onto the event log exactly:
+on a dropped connection the browser reconnects on its own, sending `Last-Event-ID` with
+the last event it saw. If event IDs *are* the log's `seq`, reconnect-and-replay is solved
+by the platform. You write `WHERE seq > ?` once.
+
+The terminal genuinely needs bidirectional bytes. That one's a WebSocket to node-pty.
+
+---
+
+## 7. Do not log token deltas
+
+Log complete assistant messages. The typing-effect is worth roughly nothing on a phone,
+and streaming deltas into the log would multiply its size and make replay-from-`seq`
+strange to reason about.
+
+If the effect is wanted later: SSE permits events without an `id:`, which stream through
+without advancing `Last-Event-ID`. Deltas ride that channel; durable events ride the
+numbered one. Clean separation, but a v2 concern.
+
+---
+
+## 8. Approval prompts are the review surface
+
+Auto-approve Read, Grep, and Glob. Prompt on everything else, including Bash. The mechanism
+is the SDK's `canUseTool` option, which returns a promise — see ARCHITECTURE.md.
+
+We also pass `settingSources: []`, so no user or project settings load inside the container.
+A stray pre-approval rule in someone's `~/.claude` would silently bypass the approval card,
+which is the one thing this project cannot allow to happen quietly.
+
+`bypassPermissions` is tempting for an "isolated environment" and would be defensible on
+security grounds — the container is disposable and git is the safety net. But it would
+turn off the feature being built. The approval card *is* the review UI.
+
+It will prompt on `ls`, and that's fine for the first week. What's actually happening is
+that you're collecting data on which commands you rubber-stamp, and *that list* becomes
+the allowlist. Guessing it up front is how you end up auto-approving something you didn't
+want to.
+
+---
+
+## 9. Approval cards live inline in the conversation
+
+Not in a separate diff tab. The conversation *is* the review: you scroll, read what Claude
+intends, see the diff in place, tap approve, keep scrolling.
+
+Render unified diffs, not side-by-side. Two columns at 390px is unreadable.
+
+Note that `Edit` tool calls hand you `old_string` and `new_string` directly — you already
+have both sides and need no diff library. Only whole-file `Write` needs real line-diffing.
+
+---
+
+## 10. SQLite, not Postgres
+
+One writer, one reader, no concurrency story, and durability satisfied by copying a file.
+Postgres here is ops work in exchange for nothing.
+
+**Would change our mind:** multiple workspace containers writing one log. At which point
+the answer is probably a log *per workspace* rather than a bigger database — see #13.
+
+---
+
+## 11. CodeMirror 6, not Monaco
+
+The load-bearing library choice. Monaco *is* VS Code's editor, and its touch handling is
+an afterthought: text selection, the virtual keyboard, and the scroll container fight each
+other on a phone. CodeMirror 6 is about a tenth the weight, handles touch and soft
+keyboards properly, and gets syntax highlighting from Lezer.
+
+---
+
+## 12. Tailscale is the authentication story
+
+Put the box on your tailnet and membership *is* authentication. Don't build a login screen
+for a service only you can reach.
+
+This also collapses TLS: `tailscale serve` terminates HTTPS on a `*.ts.net` hostname, so
+there's no certificate management and nothing is publicly exposed.
+
+---
+
+## 13. Single tenant, and multi-tenancy would live *in front*
+
+The workspace server handles exactly one user's container. It has no concept of accounts,
+authenticates nobody, and doesn't know other users exist.
+
+That is true today because there is one user, and it stays true in any multi-tenant future
+because each user would get their own instance of it. **Multi-tenancy is added in front of
+the workspace server, never through it.** A control plane authenticates, picks a container,
+and proxies. The workspace server never changes.
+
+So the single-tenant server *is* the multi-tenant one. Nothing needs preparing.
+
+Adding auth to the MVP would give the *feeling* of having prepared while addressing none of
+the real cost. What actually changes when a second person appears is that **the container
+stops being a convenience and becomes a security boundary**:
+
+- Containers can't be shared — Claude has Bash, so one user could read another's repos and
+  tokens. Per-user workspace lifecycle, and therefore a control plane.
+- Docker isolation is not generally considered sufficient against hostile code. You'd want
+  Firecracker or gVisor, or rent that from Fly / E2B.
+- You'd be executing strangers' code and serving it from your domain. Egress filtering and
+  an abuse story, because someone will mine crypto or host a phishing page.
+- Preview goes from `tailscale serve` on a port to wildcard DNS, a wildcard cert, and auth
+  in front of it, since a dev server can contain data.
+- **Anthropic forbids third parties offering claude.ai login.** Your subscription cannot
+  cover other users. Each brings an `ANTHROPIC_API_KEY`, which means encrypted per-user
+  secret storage, rotation, cost accounting — and an onboarding flow whose first step is
+  "go create an Anthropic API key."
+
+Two to three months, almost none of it the editor. And the last item has no technical
+answer: it turns a delightful personal tool into a product with a hostile first five
+minutes.
+
+**Scales along:** more projects, more devices. **Does not scale along:** more users. That's
+not a bigger version of this project; it's a different one sharing a UI.
+
+---
+
+## 14. Cheap insurance we *are* buying now
+
+Free today, irritating to retrofit:
+
+- **`session_id` and `project_id` on the events table from the first migration**, even
+  though both hold one value for months. Two unread columns cost nothing; a log without
+  them needs backfilling.
+- **`seq` is a global autoincrement, not per-session.** A single writer means a total order,
+  and SSE's resume contract wants exactly that. Replay stays
+  `WHERE seq > ? AND session_id = ?` when multi-session arrives.
+- **`AgentSession` is a class**, instantiated once. Not module-level globals. Multi-session
+  then becomes `Map<sessionId, AgentSession>` rather than untangling state.
+- **One `api.ts` on the client.** The day URLs gain a workspace prefix it's a ten-minute
+  change, not an afternoon of grep.
+- **Credentials read from one config module.** `CLAUDE_CODE_OAUTH_TOKEN` today; a
+  container provisioned for someone else would get `ANTHROPIC_API_KEY`. Config change, not
+  a hunt.
+- **The workspace server is incurious about its host.** No absolute paths outside
+  `/projects`, no reaching into host environment, all configuration injected. This is what
+  makes it safe to run N copies of.
+
+---
+
+## 15. One container, many projects — until toolchains conflict
+
+`/projects/<name>`, with `project_id` on the log. A picker screen. No architectural change.
+
+The thing that eventually forces container-per-project is conflicting toolchains: two Node
+majors, or a Python project beside a Rust one. You'll know. Until then, one image with a
+few runtimes covers most personal work.
+
+---
+
+## 16. Preview: one HTTPS port per project
+
+Path-based proxying (`/preview/myproject/`) looks tidy and breaks, because Vite emits
+absolute asset paths like `/assets/index.js` that 404 one directory up. Fixing it means
+rewriting HTML and JS in flight.
+
+Instead let `tailscale serve` TLS-terminate a port per project: app on `https://box.ts.net`,
+dev server on `https://box.ts.net:5173`. Each preview sits at an origin root, so absolute
+paths resolve, and both sides are HTTPS so there's no mixed-content block when framed.
+Cross-origin framing is fine — we never need JS access into the frame.
+
+Assign the port in project settings. Detecting which port a dev server grabbed is more
+annoying than it sounds.
+
+**Always ship an "open in new tab" button.** Any app setting `X-Frame-Options` refuses to
+frame at all, and Vite's HMR websocket needs to be told what host it's behind or the page
+loads and then silently stops updating.
+
+---
+
+## 17. `gh`, not a git library
+
+`gh auth login` once inside the container and GitHub authentication is done — clone, push,
+PRs. Pass arguments as an argv array; never build shell strings.
+
+A GitHub App is multi-tenant machinery. Not this project.
+
+---
+
+## 18. Half the feature list is convenience, not capability
+
+Git push/pull/branch, Vercel deploy, scaffolding a project, searching the filesystem —
+Claude does all of these through Bash on day one. A git UI adds no capability; it adds a
+button for something you could type. Vercel "integration" is `vercel deploy` with a token
+in the environment.
+
+Genuine capability — things that don't exist unless built — is short: the agent session
+and its log, the diff review UI, an editor that works under a thumb, the preview, and
+project open/clone.
+
+This matters for ordering. The convenience features feel most concrete and will eat the
+first three weekends if allowed to.
+
+---
+
+## 19. React + Vite, not Next.js
+
+Considered seriously, since Next is the more familiar stack here. Rejected for the client,
+and rejected emphatically for the server.
+
+**Next's value proposition doesn't apply.** File-based routing, server components, server
+actions, SSR, middleware, ISR — the MVP is one screen with no server rendering, no SEO, no
+static content, and every byte behind Tailscale. It's an `EventSource`, a reducer, and three
+components. The React is character-for-character identical either way, so the familiarity
+advantage is close to zero.
+
+**Next as the client, via `output: 'export'`,** would have worked. Fastify still serves the
+build, every other decision holds. But static export disables route handlers, server
+actions, middleware, and SSR — which is to say it disables the parts of Next you'd be
+familiar with, leaving file-based routing for about six routes. Paid for with a fiddlier
+service worker (Phase 1 is web push, and `vite-plugin-pwa` is the more direct path), a
+heavier dev loop, a larger image, and CORS in dev but not prod. Defensible; not chosen.
+
+**Next as the whole server** was the real trap, and it breaks at the three points this
+project leans on hardest:
+
+- **`next dev` reloads server modules on save**, destroying live `query()` generators and
+  pending approval promises. You'd kill Claude mid-refactor to adjust a button's padding.
+  Stashing state on `globalThis` mitigates it, but generators holding promises across module
+  reloads is fragile ground.
+- **App Router route handlers cannot upgrade to WebSocket.** Phase 4's terminal would force a
+  custom Next server — precisely where Next's benefits stop.
+- **`node-pty` and `better-sqlite3` are native modules** needing bundler config to stay
+  external.
+
+More fundamentally: Next's request model assumes short-lived, stateless handlers. The
+workspace server is long-lived, stateful, and single-writer. Working against that grain to
+ship a rendering framework into a container whose job is running an agent is a bad trade.
+
+**Would change our mind:** the multi-tenant product (see #13), which wants a marketing site,
+auth, and billing. Next is the right base for *that*. It shares a UI with this project and
+almost nothing else.

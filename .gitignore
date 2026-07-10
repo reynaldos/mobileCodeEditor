@@ -1,0 +1,17 @@
+node_modules/
+dist/
+*.tsbuildinfo
+
+# Secrets. The Claude token and GH token live here. Never commit.
+.env
+.env.local
+config/.env
+
+# The event log. Rebuildable is a lie — this is your history.
+data/
+*.db
+*.db-wal
+*.db-shm
+
+.DS_Store
+*.log

@@ -1,0 +1,70 @@
+import type { ApprovalRequest, PromptRequest, PromptResponse } from '@mce/protocol'
+
+/**
+ * Every server call goes through this file.
+ *
+ * The day URLs gain a workspace prefix — when one container becomes many — that
+ * is a change here and nowhere else. See DECISIONS #14.
+ *
+ * Empty in production, because the workspace server serves this app from the
+ * same origin. Set VITE_API_BASE=http://localhost:3000 for `vite dev`.
+ */
+const BASE: string = import.meta.env.VITE_API_BASE ?? ''
+
+export const eventStreamUrl = (): string => `${BASE}/api/events`
+
+export class ApiError extends Error {
+  constructor(
+    readonly status: number,
+    message: string,
+  ) {
+    super(message)
+  }
+}
+
+async function post<T>(path: string, body: unknown): Promise<T | undefined> {
+  const response = await fetch(`${BASE}${path}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+
+  if (!response.ok) {
+    const detail = await response.json().catch(() => ({}) as { error?: string })
+    throw new ApiError(response.status, detail.error ?? response.statusText)
+  }
+  if (response.status === 204) return undefined
+  return (await response.json()) as T
+}
+
+/** 202. The answer arrives over SSE, not in this response. */
+export async function sendPrompt(text: string): Promise<PromptResponse> {
+  return (await post<PromptResponse>('/api/prompt', { text } satisfies PromptRequest))!
+}
+
+/** Resolves the promise `canUseTool` is parked on. 409 if already decided or expired. */
+export async function decideApproval(
+  approvalId: string,
+  allow: boolean,
+  reason?: string,
+): Promise<void> {
+  await post<void>(`/api/approvals/${encodeURIComponent(approvalId)}`, {
+    allow,
+    ...(reason ? { reason } : {}),
+  } satisfies ApprovalRequest)
+}
+
+export interface Health {
+  ok: boolean
+  projectId: string
+  projectPath: string
+  lastSeq: number
+  sessionId: string | null
+  agentReady: boolean
+}
+
+export async function fetchHealth(): Promise<Health> {
+  const response = await fetch(`${BASE}/api/health`)
+  if (!response.ok) throw new ApiError(response.status, response.statusText)
+  return (await response.json()) as Health
+}
