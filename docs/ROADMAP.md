@@ -75,31 +75,38 @@ the editor. And how reconnect behaves on real cellular rather than on your couch
 
 ---
 
-## Phase 1 — A "New conversation" button
+## ~~A "New conversation" button~~ — done
 
-Prompts resume the last Claude conversation by default, so restarting the server no longer
-forgets what you were talking about. The escape hatch exists on the wire —
-`POST /api/prompt {"text": "...", "fresh": true}` — but has no button.
+Prompts resume the last Claude conversation by default, so a restart no longer forgets what
+you were talking about — which meant context accumulated forever with no way to reset.
 
-Without one, context accumulates forever and the only way to start over is `curl`. It is
-about an hour of work: a menu item, a confirm, and a flag on the request the client already
-sends.
+Shipped as an event, not a field: `conversation_reset` goes in the log, and
+`latestClaudeSessionId()` ignores anything that started before the most recent one. The reset
+therefore survives a restart for free. The client clears the view, because Claude has
+forgotten the conversation and leaving it on screen would show you something that no longer
+exists.
 
 ---
 
 ## Phase 1 — Push notifications
 
-**Why first.** The moment you use the MVP you'll hit the real mobile failure mode: you send
-a prompt, lock the phone, and now you're either staring at a black screen for three minutes
-or you've forgotten the agent exists.
+**Why first.** Phase 0 proved the loop works. Using it exposes what the loop cannot fix on
+its own: you send a prompt, pocket the phone, and Claude parks on an approval — waiting for a
+person who isn't looking at the screen. Permission prompts have no deadline. It waits forever.
 
-Web push from a home-screen-installed PWA, iOS 16.4+. Two triggers: *needs your approval*
-and *turn complete*. Tapping a notification deep-links to the approval card.
+Every other feature makes the app bigger. This one makes it *usable*.
 
-This is what makes the thing usable rather than merely working.
+Web push from a home-screen-installed PWA, iOS 16.4+. Notifies on `approval_request` always,
+on `turn_complete` only when nobody is watching, and deep-links to the pending card.
 
-**Done when** you can start a refactor, put your phone in your pocket, and get tapped on the
+**Done when** you start a refactor, put your phone in your pocket, and get tapped on the
 shoulder when Claude needs you.
+
+Full plan: **[PHASE-1.md](PHASE-1.md)**.
+
+**Take a baseline first.** Time parked awaiting approval is computable from the log today —
+`approval_request` to `approval_decision`. Measure it before you build the thing meant to
+shrink it.
 
 ---
 
