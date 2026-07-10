@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { fetchHealth, type Health } from './api.ts'
 import { MessageList } from './components/MessageList.tsx'
+import { NewConversationButton } from './components/NewConversationButton.tsx'
 import { PromptBox } from './components/PromptBox.tsx'
 import { useEventStream, useKeyboardInset } from './useEventStream.ts'
 
@@ -32,6 +33,9 @@ export function App(): React.JSX.Element {
           {/* No cost display. Usage runs on a subscription, so a dollar figure is
               a meter reading rendered as an invoice. The log still records
               costUsd and apiKeySource; analytics is a query, not a header. */}
+          <NewConversationButton
+            busy={state.agent === 'thinking' || state.agent === 'awaiting_approval'}
+          />
           <span className={`conn conn-${connection}`} title={connection} />
         </div>
       </header>

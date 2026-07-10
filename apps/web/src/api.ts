@@ -42,6 +42,14 @@ export async function sendPrompt(text: string): Promise<PromptResponse> {
   return (await post<PromptResponse>('/api/prompt', { text } satisfies PromptRequest))!
 }
 
+/**
+ * Ends the live session and draws a line in the log. The next prompt starts a
+ * conversation Claude has no memory of.
+ */
+export async function startNewConversation(): Promise<void> {
+  await post<void>('/api/conversations/new', {})
+}
+
 /** Resolves the promise `canUseTool` is parked on. 409 if already decided or expired. */
 export async function decideApproval(
   approvalId: string,

@@ -64,13 +64,33 @@ export class SessionManager {
    * resuming is the default and a fresh start is the explicit request.
    */
   async prompt(text: string, options: PromptOptions = {}): Promise<string> {
-    if (options.fresh) await this.#endCurrent()
+    if (options.fresh) await this.newConversation()
 
     const live = this.#liveSession()
-    const session = live ?? this.#startSession(options.fresh ? undefined : this.#lastConversation())
+    const session = live ?? this.#startSession(this.#lastConversation())
 
     session.prompt(text)
     return session.id
+  }
+
+  /**
+   * Ends the live session and draws a line in the log. The next prompt starts a
+   * conversation Claude has no memory of.
+   *
+   * The line is an event, not a field. `#lastConversation()` reads it back, so
+   * a reset survives a restart for free — like everything else here.
+   */
+  async newConversation(): Promise<void> {
+    const sessionId = this.#currentId
+    await this.#endCurrent()
+
+    this.#log.append({
+      type: 'conversation_reset',
+      sessionId: sessionId ?? 'system',
+      projectId: this.#config.projectId,
+      ts: Date.now(),
+    })
+    this.#currentId = undefined
   }
 
   resolveApproval(approvalId: string, allow: boolean, reason?: string): ApprovalOutcome {

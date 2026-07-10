@@ -125,7 +125,11 @@ export class EventLog {
     const row = this.#db
       .prepare(
         `SELECT json_extract(payload, '$.claudeSessionId') AS id
-           FROM events WHERE type = 'session_started' ORDER BY seq DESC LIMIT 1`,
+           FROM events
+          WHERE type = 'session_started'
+            -- A reset draws a line. Nothing before it is resumable.
+            AND seq > COALESCE((SELECT MAX(seq) FROM events WHERE type = 'conversation_reset'), 0)
+          ORDER BY seq DESC LIMIT 1`,
       )
       .get() as { id: string | null } | undefined
     return row?.id ?? undefined

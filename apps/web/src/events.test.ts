@@ -123,3 +123,43 @@ test('cost and apiKeySource reach the log but never the rendered state', () => {
   assert.ok(!('costUsd' in state), 'no cost in client state')
   assert.ok(!('apiKeySource' in state), 'no auth source in client state')
 })
+
+test('a conversation_reset clears the view — Claude forgot it, so the screen forgets it', () => {
+  const state = run([
+    { type: 'session_started', claudeSessionId: 'c1', model: 'opus' },
+    { type: 'user_prompt', text: 'remember this' },
+    { type: 'assistant_text', text: 'ok' },
+    { type: 'turn_complete' },
+    { type: 'conversation_reset' },
+  ])
+
+  assert.deepEqual(kinds(state), [])
+  assert.equal(state.agent, 'idle')
+  assert.equal(state.sessionId, null)
+})
+
+test('a reset drops correlation indexes, so a stale tool_result cannot resurrect a row', () => {
+  const state = run([
+    { type: 'tool_use', toolUseId: 't1', name: 'Read', input: {} },
+    { type: 'conversation_reset' },
+    { type: 'tool_result', toolUseId: 't1', ok: true, summary: 'from the old life' },
+  ])
+
+  assert.deepEqual(kinds(state), [])
+})
+
+test('replaying the whole log after a reset still shows a fresh view', () => {
+  // The reducer runs over every event from seq 0 on page load. Reaching the
+  // reset must land it back at empty, or reload-after-reset shows the old chat.
+  const state = run([
+    { type: 'user_prompt', text: 'old' },
+    { type: 'assistant_text', text: 'old reply' },
+    { type: 'conversation_reset' },
+    { type: 'session_started', claudeSessionId: 'c2', model: 'opus' },
+    { type: 'user_prompt', text: 'new' },
+  ])
+
+  assert.deepEqual(kinds(state), ['user'])
+  assert.equal(state.items[0]?.kind === 'user' && state.items[0].text, 'new')
+  assert.equal(state.agent, 'thinking')
+})

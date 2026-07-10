@@ -192,3 +192,92 @@ test('recoverOnBoot expires approvals the dead process was parked on', async () 
   assert.deepEqual(log.openSessions(), [])
   assert.ok(log.replaySince(0).some((e) => e.type === 'approval_expired'))
 })
+
+test('a reset draws a line: the next prompt resumes nothing', async () => {
+  const log = makeLog()
+  const { queryFn, resumes } = recordingQuery(['claude-1', 'claude-2'])
+  const manager = new SessionManager(log, CONFIG, queryFn)
+
+  await manager.prompt('remember this')
+  await waitFor(() => startedCount(log) === 1, 'first session')
+  assert.equal(manager.resumableConversationId, 'claude-1')
+
+  await manager.newConversation()
+  assert.equal(manager.resumableConversationId, undefined, 'nothing before the line is resumable')
+
+  await manager.prompt('who are you')
+  await waitFor(() => startedCount(log) === 2, 'second session')
+
+  assert.deepEqual(resumes, [undefined, undefined])
+  await manager.shutdown()
+})
+
+test('a reset survives a restart, because it is an event and not a field', async () => {
+  const log = makeLog()
+  const first = recordingQuery(['claude-1'])
+  const before = new SessionManager(log, CONFIG, first.queryFn)
+  await before.prompt('remember this')
+  await waitFor(() => startedCount(log) === 1, 'first session')
+  await before.newConversation()
+  await before.shutdown()
+
+  // New process, same log.
+  const second = recordingQuery(['claude-2'])
+  const after = new SessionManager(log, CONFIG, second.queryFn)
+  after.recoverOnBoot()
+
+  assert.equal(after.resumableConversationId, undefined)
+  await after.prompt('hello again')
+  await waitFor(() => startedCount(log) === 2, 'second session')
+  assert.deepEqual(second.resumes, [undefined])
+  await after.shutdown()
+})
+
+test('after a reset, a later session becomes resumable again', async () => {
+  const log = makeLog()
+  const { queryFn, resumes } = recordingQuery(['claude-1', 'claude-2', 'claude-3'])
+  const manager = new SessionManager(log, CONFIG, queryFn)
+
+  await manager.prompt('one')
+  await waitFor(() => startedCount(log) === 1, 's1')
+  await manager.newConversation()
+
+  await manager.prompt('two')
+  await waitFor(() => startedCount(log) === 2, 's2')
+  assert.equal(manager.resumableConversationId, 'claude-2', 'the post-reset session is resumable')
+
+  await manager.shutdown()
+  const after = new SessionManager(log, CONFIG, queryFn)
+  await after.prompt('three')
+  await waitFor(() => startedCount(log) === 3, 's3')
+
+  assert.deepEqual(resumes, [undefined, undefined, 'claude-2'])
+  await after.shutdown()
+})
+
+test('newConversation ends the live session', async () => {
+  const log = makeLog()
+  const { queryFn } = recordingQuery(['claude-1'])
+  const manager = new SessionManager(log, CONFIG, queryFn)
+
+  await manager.prompt('go')
+  await waitFor(() => startedCount(log) === 1, 'session')
+  await manager.newConversation()
+
+  assert.equal(manager.currentSessionId, undefined)
+  const ended = log.replaySince(0).filter((e) => e.type === 'session_ended')
+  assert.equal(ended.length, 1)
+  assert.equal(ended[0]?.type === 'session_ended' && ended[0].reason, 'complete', 'it was idle')
+  assert.ok(log.replaySince(0).some((e) => e.type === 'conversation_reset'))
+  await manager.shutdown()
+})
+
+test('resetting with no session at all is harmless', async () => {
+  const log = makeLog()
+  const manager = new SessionManager(log, CONFIG)
+  await manager.newConversation()
+  await manager.newConversation()
+
+  assert.equal(log.replaySince(0).filter((e) => e.type === 'conversation_reset').length, 2)
+  assert.equal(manager.resumableConversationId, undefined)
+})

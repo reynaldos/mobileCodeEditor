@@ -5,6 +5,7 @@ import { existsSync } from 'node:fs'
 import type { Config } from './config.ts'
 import type { EventLog } from './log.ts'
 import { registerApprovals } from './routes/approvals.ts'
+import { registerConversations } from './routes/conversations.ts'
 import { registerDebug } from './routes/debug.ts'
 import { registerEvents } from './routes/events.ts'
 import { registerPrompt } from './routes/prompt.ts'
@@ -41,6 +42,7 @@ export async function buildServer(
   registerEvents(app, log, config)
   registerPrompt(app, sessions)
   registerApprovals(app, sessions)
+  registerConversations(app, sessions)
   registerDebug(app, log, config)
 
   // Serving the PWA from this same origin is what deletes CORS, mixed content,

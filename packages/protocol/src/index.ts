@@ -51,6 +51,15 @@ export type EventBody =
   | { type: 'approval_expired'; approvalId: string }
   /** One assistant turn finished. The agent is alive and awaiting input. */
   | { type: 'turn_complete'; costUsd?: number; numTurns?: number }
+  /**
+   * A deliberate line under the conversation. Claude will not resume anything
+   * before this point.
+   *
+   * Recorded rather than remembered: `latestClaudeSessionId()` ignores any
+   * session that started before the most recent reset, so "what do we resume"
+   * stays a query over the log instead of state on the server.
+   */
+  | { type: 'conversation_reset' }
   | {
       type: 'session_ended'
       reason: 'complete' | 'error' | 'interrupted'

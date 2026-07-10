@@ -93,6 +93,38 @@ body {
   color: var(--warn);
 }
 
+/* Header chips. 32px tall is under the 44px touch minimum on purpose — this is a
+   destructive action, and it takes two taps anyway. */
+.btn-chip {
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.btn-chip:disabled {
+  opacity: 0.5;
+}
+.btn-chip-danger {
+  background: transparent;
+  border-color: #4a2326;
+  color: var(--del);
+  font-weight: 600;
+}
+.btn-chip-ghost {
+  padding: 0 10px;
+  color: var(--muted);
+}
+.confirm {
+  display: flex;
+  gap: 6px;
+}
+
 .conn {
   width: 8px;
   height: 8px;
@@ -230,6 +262,7 @@ body {
   letter-spacing: 0.08em;
   padding: 4px 0;
 }
+
 .ended-interrupted,
 .ended-error {
   color: var(--warn);

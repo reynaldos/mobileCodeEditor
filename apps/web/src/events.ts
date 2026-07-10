@@ -162,6 +162,17 @@ export function reduce(state: State, event: Event): State {
     case 'turn_complete':
       return { ...base, agent: 'awaiting_input', items: [...state.items, { kind: 'turn', key }] }
 
+    /**
+     * Clear the screen. Claude has forgotten the conversation, so showing it
+     * would be showing you something that no longer exists.
+     *
+     * Only the *view* is cleared. The log is append-only and still holds every
+     * event; a full replay from seq 0 simply reduces to an empty list again at
+     * this point, which is what makes reload-after-reset show a fresh view.
+     */
+    case 'conversation_reset':
+      return { ...base, agent: 'idle', sessionId: null, items: [], toolIndex: {}, approvalIndex: {} }
+
     case 'session_ended':
       return {
         ...base,
