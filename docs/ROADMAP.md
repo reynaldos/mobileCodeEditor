@@ -75,6 +75,18 @@ the editor. And how reconnect behaves on real cellular rather than on your couch
 
 ---
 
+## Phase 1 — A "New conversation" button
+
+Prompts resume the last Claude conversation by default, so restarting the server no longer
+forgets what you were talking about. The escape hatch exists on the wire —
+`POST /api/prompt {"text": "...", "fresh": true}` — but has no button.
+
+Without one, context accumulates forever and the only way to start over is `curl`. It is
+about an hour of work: a menu item, a confirm, and a flag on the request the client already
+sends.
+
+---
+
 ## Phase 1 — Push notifications
 
 **Why first.** The moment you use the MVP you'll hit the real mobile failure mode: you send

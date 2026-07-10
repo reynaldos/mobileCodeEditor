@@ -1,9 +1,14 @@
 import { randomUUID } from 'node:crypto'
 import type { Config } from './config.ts'
 import type { EventLog } from './log.ts'
-import { AgentSession } from './session.ts'
+import { AgentSession, type QueryFn } from './session.ts'
 
 export type ApprovalOutcome = 'ok' | 'not_pending'
+
+export interface PromptOptions {
+  /** Start a new Claude conversation instead of continuing the last one. */
+  fresh?: boolean
+}
 
 /**
  * Holds one session in the MVP and a Map anyway, because going to N sessions
@@ -14,14 +19,14 @@ export class SessionManager {
   readonly #sessions = new Map<string, AgentSession>()
   readonly #log: EventLog
   readonly #config: Config
+  readonly #queryFn: QueryFn | undefined
 
   #currentId: string | undefined
-  /** Claude's own session id from a run the process died during. */
-  #resumeFrom: string | undefined
 
-  constructor(log: EventLog, config: Config) {
+  constructor(log: EventLog, config: Config, queryFn?: QueryFn) {
     this.#log = log
     this.#config = config
+    this.#queryFn = queryFn
   }
 
   /**
@@ -29,6 +34,9 @@ export class SessionManager {
    *
    * Expire approvals first — each was a promise nobody can resolve now — then
    * close the sessions that were mid-generator when we died.
+   *
+   * Nothing here decides what to resume. That is read from the log at the
+   * moment a session starts, so a clean shutdown and a crash behave the same.
    */
   recoverOnBoot(): void {
     for (const { approvalId, sessionId, projectId } of this.#log.pendingApprovals()) {
@@ -36,9 +44,6 @@ export class SessionManager {
     }
 
     for (const { sessionId, projectId } of this.#log.openSessions()) {
-      // Remember where Claude was, so the next prompt continues the conversation
-      // rather than starting a stranger. Last one wins; there is only ever one.
-      this.#resumeFrom = this.#log.claudeSessionIdOf(sessionId) ?? this.#resumeFrom
       this.#log.append({
         type: 'session_ended',
         reason: 'interrupted',
@@ -50,9 +55,20 @@ export class SessionManager {
     }
   }
 
-  /** Starts a session if none is live, otherwise feeds the existing one. */
-  prompt(text: string): string {
-    const session = this.#liveSession() ?? this.#startSession()
+  /**
+   * Feeds the live session, or starts one that continues the last conversation.
+   *
+   * Claude's memory lives in the agent process, not in our log. Restarting the
+   * server therefore forgets everything unless we hand `resume` back — and the
+   * server restarts constantly, both from `node --watch` and from deploys. So
+   * resuming is the default and a fresh start is the explicit request.
+   */
+  async prompt(text: string, options: PromptOptions = {}): Promise<string> {
+    if (options.fresh) await this.#endCurrent()
+
+    const live = this.#liveSession()
+    const session = live ?? this.#startSession(options.fresh ? undefined : this.#lastConversation())
+
     session.prompt(text)
     return session.id
   }
@@ -68,12 +84,26 @@ export class SessionManager {
     return this.#currentId
   }
 
+  /** The conversation a new session would continue, or undefined if there is none. */
+  get resumableConversationId(): string | undefined {
+    return this.#lastConversation()
+  }
+
   async shutdown(): Promise<void> {
     await Promise.all([...this.#sessions.values()].map((s) => s.stop()))
     this.#sessions.clear()
   }
 
   // -------------------------------------------------------------------------
+
+  /**
+   * Read from the log, not from memory. A session that ended cleanly is just as
+   * resumable as one the process died during — the distinction only ever
+   * mattered because we used to recover it during boot.
+   */
+  #lastConversation(): string | undefined {
+    return this.#log.latestClaudeSessionId()
+  }
 
   #liveSession(): AgentSession | undefined {
     if (!this.#currentId) return undefined
@@ -84,17 +114,21 @@ export class SessionManager {
     return dead ? undefined : session
   }
 
-  #startSession(): AgentSession {
+  async #endCurrent(): Promise<void> {
+    const live = this.#liveSession()
+    if (!live) return
+    await live.stop()
+  }
+
+  #startSession(resume: string | undefined): AgentSession {
     const id = randomUUID()
     const session = new AgentSession({
       id,
       log: this.#log,
       config: this.#config,
-      ...(this.#resumeFrom ? { resume: this.#resumeFrom } : {}),
+      ...(resume ? { resume } : {}),
+      ...(this.#queryFn ? { queryFn: this.#queryFn } : {}),
     })
-
-    // Consumed once. A second restart shouldn't chain onto a stale conversation.
-    this.#resumeFrom = undefined
 
     session.start()
     this.#sessions.set(id, session)

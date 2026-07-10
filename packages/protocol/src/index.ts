@@ -89,6 +89,14 @@ export type SessionStatus =
 /** POST /api/prompt */
 export interface PromptRequest {
   text: string
+  /**
+   * Start a new Claude conversation instead of continuing the last one.
+   *
+   * Resuming is the default: Claude's memory lives in the agent process, and the
+   * server restarts constantly. Without resume, every restart silently forgets
+   * what you were talking about.
+   */
+  fresh?: boolean
 }
 
 /** 202 Accepted. Everything that happens next arrives over SSE. */

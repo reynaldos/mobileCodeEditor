@@ -14,7 +14,8 @@ export function registerPrompt(app: FastifyInstance, sessions: SessionManager): 
     if (!text) return reply.code(400).send({ error: 'text is required' })
 
     try {
-      const sessionId = sessions.prompt(text)
+      // Continues the last conversation unless explicitly told not to.
+      const sessionId = await sessions.prompt(text, { fresh: body?.fresh === true })
       return reply.code(202).send({ sessionId } satisfies PromptResponse)
     } catch (err) {
       // Almost always a missing CLAUDE_CODE_OAUTH_TOKEN. Say so plainly.

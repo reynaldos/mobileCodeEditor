@@ -33,6 +33,8 @@ export async function buildServer(
     projectPath: config.projectPath,
     lastSeq: log.lastSeq(),
     sessionId: sessions.currentSessionId ?? null,
+    // The conversation your next prompt would continue. null means a clean start.
+    resumes: sessions.resumableConversationId ?? null,
     agentReady: Boolean(config.claudeToken),
   }))
 

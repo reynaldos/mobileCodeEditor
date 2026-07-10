@@ -114,6 +114,23 @@ export class EventLog {
       .all() as Array<{ sessionId: string; projectId: string }>
   }
 
+  /**
+   * The most recent conversation Claude knows about, whatever became of it.
+   *
+   * Handing this back as `resume` is what lets you restart the server and keep
+   * talking. Recovered from the log rather than a table — the log is the only
+   * durable state, so this survives a crash exactly as well as a clean exit.
+   */
+  latestClaudeSessionId(): string | undefined {
+    const row = this.#db
+      .prepare(
+        `SELECT json_extract(payload, '$.claudeSessionId') AS id
+           FROM events WHERE type = 'session_started' ORDER BY seq DESC LIMIT 1`,
+      )
+      .get() as { id: string | null } | undefined
+    return row?.id ?? undefined
+  }
+
   /** The Claude session id for `resume`, recovered from the log rather than a table. */
   claudeSessionIdOf(sessionId: string): string | undefined {
     const row = this.#db
