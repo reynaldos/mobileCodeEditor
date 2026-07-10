@@ -8,6 +8,7 @@ import type {
 } from '@anthropic-ai/claude-agent-sdk'
 import type { EventBody, NewEvent, SessionStatus } from '@mce/protocol'
 import { randomUUID } from 'node:crypto'
+import { setTimeout as sleep } from 'node:timers/promises'
 import { AsyncQueue } from './async-queue.ts'
 import { assertAgentCredentials, type Config } from './config.ts'
 import type { EventLog } from './log.ts'
@@ -19,6 +20,12 @@ import type { EventLog } from './log.ts'
 const AUTO_APPROVED = new Set(['Read', 'Grep', 'Glob'])
 
 const SUMMARY_MAX = 200
+
+/** How long an idle session gets to return on its own before we abort it. */
+const SHUTDOWN_GRACE_MS = 2_000
+
+/** Swappable so tests can drive the message loop without the real SDK. */
+export type QueryFn = typeof query
 
 interface Pending {
   readonly toolUseId: string
@@ -33,6 +40,8 @@ export interface AgentSessionOptions {
   readonly config: Config
   /** A Claude session id from a previous, interrupted run. */
   readonly resume?: string
+  /** Injected in tests. Defaults to the real SDK. */
+  readonly queryFn?: QueryFn
 }
 
 export class AgentSession {
@@ -41,6 +50,7 @@ export class AgentSession {
   readonly #log: EventLog
   readonly #config: Config
   readonly #resume: string | undefined
+  readonly #queryFn: QueryFn
 
   readonly #queue = new AsyncQueue<SDKUserMessage>()
   readonly #pending = new Map<string, Pending>()
@@ -51,12 +61,14 @@ export class AgentSession {
   #claudeSessionId: string | undefined
   #lastCostUsd: number | undefined
   #done: Promise<void> | undefined
+  #interruptMessage: string | undefined
 
   constructor(opts: AgentSessionOptions) {
     this.id = opts.id
     this.#log = opts.log
     this.#config = opts.config
     this.#resume = opts.resume
+    this.#queryFn = opts.queryFn ?? query
   }
 
   get status(): SessionStatus {
@@ -72,7 +84,7 @@ export class AgentSession {
     if (this.#query) throw new Error('session already started')
     assertAgentCredentials(this.#config)
 
-    this.#query = query({
+    this.#query = this.#queryFn({
       // Streaming input: follow-up prompts feed the SAME conversation.
       prompt: this.#queue,
       options: {
@@ -129,19 +141,46 @@ export class AgentSession {
     return this.#pending.has(approvalId)
   }
 
+  /**
+   * Shutting down an IDLE session is not an interruption.
+   *
+   * `interrupted` should mean work was lost. A session sitting in
+   * `awaiting_input` has nothing in flight, so closing its input stream lets the
+   * generator return on its own and the session ends as `complete`. Aborting
+   * unconditionally mislabels a clean stop — you finish a turn, `node --watch`
+   * restarts, and the transcript claims the agent was interrupted.
+   */
   async stop(): Promise<void> {
     // Deny anything outstanding first: a promise nobody resolves hangs the
     // agent forever. The SDK is explicit that permission prompts have no
-    // deadline.
+    // deadline. Note this makes an awaiting_approval session non-idle.
     for (const [approvalId, pending] of this.#pending) {
       this.#pending.delete(approvalId)
       this.#append({ type: 'approval_decision', approvalId, allow: false, reason: 'Server shutting down.' })
       pending.resolve({ behavior: 'deny', message: 'Server shutting down.', interrupt: true })
     }
 
-    this.#abort.abort()
+    if (!this.#query || !this.#done) return
+    const idle = this.#status === 'awaiting_input' || this.#status === 'ended'
+
     if (!this.#queue.closed) this.#queue.close()
-    await this.#done?.catch(() => {})
+
+    if (idle) {
+      const exited = await Promise.race([
+        this.#done.then(
+          () => true,
+          () => true,
+        ),
+        sleep(SHUTDOWN_GRACE_MS, false),
+      ])
+      if (exited) return
+      this.#interruptMessage = 'Server stopped; the agent did not exit cleanly.'
+    } else {
+      this.#interruptMessage = 'Server stopped while the agent was working.'
+    }
+
+    this.#abort.abort()
+    await this.#done.catch(() => {})
   }
 
   // -------------------------------------------------------------------------
@@ -196,7 +235,7 @@ export class AgentSession {
       for await (const message of this.#query as Query) this.#onMessage(message)
       this.#end('complete')
     } catch (err) {
-      if (this.#abort.signal.aborted) this.#end('interrupted')
+      if (this.#abort.signal.aborted) this.#end('interrupted', this.#interruptMessage)
       else this.#end('error', err instanceof Error ? err.message : String(err))
     }
   }
