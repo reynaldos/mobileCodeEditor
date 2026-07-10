@@ -26,3 +26,8 @@ services:
       - ./config:/config:ro
     environment:
       PROJECT_PATH: /projects/app
+      # Non-secret commit identity, interpolated from the gitignored root .env so
+      # this file stays generic. A per-tenant control plane would inject these the
+      # same way, per user, from their GitHub profile. See DECISIONS #13.
+      GIT_AUTHOR_NAME: ${GIT_AUTHOR_NAME:-}
+      GIT_AUTHOR_EMAIL: ${GIT_AUTHOR_EMAIL:-}

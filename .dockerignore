@@ -5,6 +5,10 @@ data
 .env
 .env.local
 config
+# The mounted volumes are never part of the build. projects/ especially — it
+# holds cloned repos (whole git trees) that would bloat the context and land at
+# the wrong path in the image.
+projects
 .git
 .DS_Store
 *.log
