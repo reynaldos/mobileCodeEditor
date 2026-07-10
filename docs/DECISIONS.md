@@ -144,10 +144,22 @@ which is the one thing this project cannot allow to happen quietly.
 security grounds — the container is disposable and git is the safety net. But it would
 turn off the feature being built. The approval card *is* the review UI.
 
-It will prompt on `ls`, and that's fine for the first week. What's actually happening is
-that you're collecting data on which commands you rubber-stamp, and *that list* becomes
-the allowlist. Guessing it up front is how you end up auto-approving something you didn't
-want to.
+**Correction, from the first real session.** We predicted this would prompt on `ls`, and it
+does not — because our `canUseTool` is the *second* filter, not the first. Claude Code's own
+permission engine classifies tool calls before any reach us: under `permissionMode: 'default'`
+it allows read-only operations silently and escalates the rest.
+
+Verified rather than assumed. In one session `pwd && ls`, `grep -ril`, and `grep -n` all ran
+with no card. A probe against a scratch directory confirmed the other half: `touch probe.txt`
+raised an approval card and the file was never created.
+
+So the allowlist we planned to derive from a week of rubber-stamping already exists, is
+maintained upstream, and is better than the one we'd have written. `AUTO_APPROVED` stays as
+belt-and-braces for Read/Grep/Glob. What survives from the original reasoning is the part
+that mattered: the card is a review surface, so never reach for `bypassPermissions`.
+
+A mutating Bash command stops and asks; a read-only one doesn't. That is the behavior you
+want — a card for every `ls` would bury the cards that matter.
 
 ---
 

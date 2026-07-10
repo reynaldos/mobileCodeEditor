@@ -92,6 +92,11 @@ Map SDK messages onto log events: `session_started`, `assistant_text`, `tool_use
 file read.
 
 **2.6 — `canUseTool` + approvals**
+
+> **Resolved.** We expected to prompt on `ls` and to derive an allowlist from a week of
+> rubber-stamping. Neither happened: Claude Code classifies read-only tool calls itself and
+> never escalates them. Mutating Bash does raise a card. See DECISIONS #8.
+
 Auto-approve Read, Grep, Glob. Everything else: mint an `approvalId`, append
 `approval_request`, store a deferred promise in the session's pending map, return the
 promise. `POST /api/approvals/:id` appends `approval_decision` and resolves it. Already-
@@ -165,14 +170,33 @@ Host runs Tailscale; container ports bind to the host.
 
 ---
 
-## Acceptance test
+## Acceptance test — PASSED
 
 > From your phone, on **cellular** — not your home wifi — send a prompt to Claude in a real
 > repo, watch it stream, approve a diff, and see the change land on disk. Then lock the
 > phone mid-run, wait four minutes, and come back. Nothing is lost.
 
-Test that last clause with airplane mode. It is the acceptance criterion, not a nice-to-have
-— it's the one thing that distinguishes this from a desktop app.
+Met over Tailscale from an iPhone: prompt sent, `Edit` approved by thumb, change written.
+Safari backgrounded and the app fully closed; on reopening, the conversation replayed and the
+session continued. `EventSource` resent `Last-Event-ID` and the server replayed from that seq.
+The reconnect story cost us fifteen lines and was never the hard part.
+
+Docker was skipped and should have been ordered last from the start. A container buys
+durability; it answers none of the questions this phase existed to ask.
+
+### What the first real sessions taught us
+
+Four bugs, none findable from the design, all found within minutes of real use:
+
+1. The approval card was crushed to a hairline by `flex-shrink` — `.card { overflow: hidden }`
+   makes a flex item's automatic minimum size zero.
+2. SSE carried no CORS headers, because `reply.hijack()` skips the plugin lifecycle. The
+   documented dev setup could not work.
+3. Two server processes wrote one log: `node --watch` spawns the replacement before the
+   predecessor dies. Single-writer is now enforced with a lock.
+4. Stopping an idle session was labelled `interrupted`, claiming work was lost when none was.
+
+And one prediction that was simply wrong: we expected to prompt on `ls`. See DECISIONS #8.
 
 ---
 

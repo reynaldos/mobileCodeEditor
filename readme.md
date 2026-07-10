@@ -9,8 +9,17 @@ with inline diffs you approve with your thumb — not an editor.
 
 ## Status
 
-**Phase 0 is built.** Event log, SSE with resume, the approval bridge, and the client are
-in and tested. Not yet run against a real repo with a real token — that's your move.
+**Phase 0 is done.** The acceptance criterion is met: a prompt sent from a phone over
+Tailscale, a diff approved with a thumb, the change landed on disk — then Safari backgrounded,
+the app closed, and the session picked up exactly where it left off. `Last-Event-ID` did the
+work; nothing was lost.
+
+Installed to the home screen, which is also the context iOS requires for Phase 1's web push.
+
+Not done, and deliberately so: the container. `docker build` has never once been run. Docker
+buys durability, not the answer to the question Phase 0 existed to ask.
+
+Next: a **New conversation** button, then push notifications. See [ROADMAP.md](docs/ROADMAP.md).
 
 ## Quickstart
 

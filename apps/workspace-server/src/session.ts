@@ -14,8 +14,16 @@ import { assertAgentCredentials, type Config } from './config.ts'
 import type { EventLog } from './log.ts'
 
 /**
- * The only tools we never prompt on. Everything else — Bash included — gets an
- * approval card, because the card IS the review surface. See DECISIONS #8.
+ * Tools we never prompt on.
+ *
+ * This is a second filter, not the first. Claude Code's own permission engine
+ * decides what reaches `canUseTool` at all: under `permissionMode: 'default'` it
+ * classifies read-only operations as safe and never asks. Verified empirically —
+ * `pwd`, `ls`, and `grep -r` ran unprompted, while `touch probe.txt` raised a
+ * card and did not create the file.
+ *
+ * So Bash is not blanket-prompted, and that turns out to be the behavior you
+ * want: a card for every `ls` would bury the cards that matter.
  */
 const AUTO_APPROVED = new Set(['Read', 'Grep', 'Glob'])
 
@@ -244,8 +252,14 @@ export class AgentSession {
     switch (message.type) {
       case 'system': {
         if (message.subtype !== 'init') return
-        this.#claudeSessionId = message.session_id
         this.#status = 'thinking'
+
+        // The SDK re-emits system/init — observed once per turn in streaming-input
+        // mode. Only the first one starts a session. A *changed* id means the
+        // conversation forked or compacted, which is worth recording.
+        if (this.#claudeSessionId === message.session_id) return
+        this.#claudeSessionId = message.session_id
+
         this.#append({
           type: 'session_started',
           claudeSessionId: message.session_id,

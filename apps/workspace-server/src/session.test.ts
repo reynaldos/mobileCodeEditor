@@ -108,6 +108,49 @@ test('a turn maps SDK messages onto the log', async () => {
   await session.stop()
 })
 
+test('a re-emitted system/init does not start a second session', async () => {
+  // The SDK emits init again on later turns. Observed in a real session: two
+  // session_started rows for one AgentSession, same claude session id.
+  const { session, log } = makeSession(
+    fakeQuery(async function* ({ prompt }) {
+      yield init()
+      for await (const _ of prompt) {
+        yield init() // same session_id, second turn
+        yield done()
+      }
+    }),
+  )
+
+  session.start()
+  session.prompt('one')
+  await waitFor(() => session.status === 'awaiting_input', 'turn one')
+  session.prompt('two')
+  await waitFor(() => types(log).filter((t) => t === 'turn_complete').length === 2, 'turn two')
+
+  assert.equal(types(log).filter((t) => t === 'session_started').length, 1)
+  await session.stop()
+})
+
+test('an init with a CHANGED session id records a new session — the conversation forked', async () => {
+  const { session, log } = makeSession(
+    fakeQuery(async function* ({ prompt }) {
+      yield init()
+      for await (const _ of prompt) {
+        yield { type: 'system', subtype: 'init', session_id: 'claude-2', model: 'opus' } as unknown as SDKMessage
+        yield done()
+      }
+    }),
+  )
+
+  session.start()
+  session.prompt('go')
+  await waitFor(() => session.status === 'awaiting_input', 'turn')
+
+  assert.equal(types(log).filter((t) => t === 'session_started').length, 2)
+  assert.equal(session.claudeSessionId, 'claude-2')
+  await session.stop()
+})
+
 test('stopping an IDLE session ends it complete, not interrupted', async () => {
   const { session, log } = makeSession(
     fakeQuery(async function* ({ prompt }) {

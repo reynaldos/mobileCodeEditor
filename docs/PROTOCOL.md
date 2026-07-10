@@ -127,16 +127,24 @@ configuration anywhere in this project.
 
 ## Tool handling
 
+Claude Code's permission engine runs **before** ours. Under `permissionMode: 'default'` it
+allows read-only operations without asking, and only escalates the rest to `canUseTool`.
+What we see, and what we do with it:
+
 | Tool | Behavior |
 |---|---|
 | `Read`, `Grep`, `Glob` | auto-approve, emit `tool_use` chip |
+| `Bash`, read-only (`ls`, `grep`, `pwd`) | never reaches us — runs, emits a chip |
+| `Bash`, mutating (`touch`, `rm`, `git push`) | `approval_request` → command card |
 | `Edit`, `Write` | `approval_request` → diff card |
-| `Bash` | `approval_request` → command card |
 | everything else | `approval_request` |
 
-Yes, this prompts on `ls`. For the first week that's the point — you are collecting data on
-which commands you rubber-stamp, and *that list* becomes the allowlist. Guessing it up front
-is how you auto-approve something you didn't want to.
+Verified, not assumed: in a real session `pwd && ls` and two `grep`s ran with no card, while
+a probe confirmed `touch probe.txt` raised one and left the file uncreated.
+
+A tool call that fails validation errors *before* the permission check — an `Edit` on a file
+Claude hasn't read yet returns `tool_result ok=false` with no `approval_request`. That is not
+a missing card.
 
 ### Rendering diffs
 
