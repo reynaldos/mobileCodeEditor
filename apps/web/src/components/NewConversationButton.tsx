@@ -10,6 +10,9 @@ import { startNewConversation } from '../api.ts'
  */
 const CONFIRM_TIMEOUT_MS = 4_000
 
+/* 32px tall, under the 44px touch minimum on purpose: destructive, and two taps. */
+const CHIP = 'h-8 shrink-0 whitespace-nowrap rounded-lg border px-3 text-[13px] disabled:opacity-50'
+
 export function NewConversationButton({ busy }: { busy: boolean }): React.JSX.Element {
   const [confirming, setConfirming] = useState(false)
   const [sending, setSending] = useState(false)
@@ -25,7 +28,7 @@ export function NewConversationButton({ busy }: { busy: boolean }): React.JSX.El
     setSending(true)
     try {
       await startNewConversation()
-      // The `conversation_reset` event arrives over SSE and draws the divider.
+      // The `conversation_reset` event arrives over SSE and clears the view.
     } finally {
       setSending(false)
       setConfirming(false)
@@ -34,18 +37,29 @@ export function NewConversationButton({ busy }: { busy: boolean }): React.JSX.El
 
   if (!confirming) {
     return (
-      <button className="btn-chip" onClick={() => setConfirming(true)} title="Start a new conversation">
+      <button
+        className={`${CHIP} border-line bg-panel-2 text-fg`}
+        onClick={() => setConfirming(true)}
+        title="Start a new conversation"
+      >
         New
       </button>
     )
   }
 
   return (
-    <span className="confirm">
-      <button className="btn-chip btn-chip-danger" disabled={sending} onClick={() => void reset()}>
+    <span className="flex gap-1.5">
+      <button
+        className={`${CHIP} border-[#4a2326] bg-transparent font-semibold text-del`}
+        disabled={sending}
+        onClick={() => void reset()}
+      >
         {sending ? '…' : busy ? 'Stop & start over' : 'Start over'}
       </button>
-      <button className="btn-chip btn-chip-ghost" onClick={() => setConfirming(false)}>
+      <button
+        className={`${CHIP} border-line bg-panel-2 px-2.5 text-muted`}
+        onClick={() => setConfirming(false)}
+      >
         ✕
       </button>
     </span>

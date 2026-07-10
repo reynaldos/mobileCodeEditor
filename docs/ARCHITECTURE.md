@@ -116,6 +116,12 @@ Secrets never enter the log. Redact on the way in. The log is what you dump to d
 React + Vite, built to static files the server hosts. An `EventSource` feeds a reducer over
 the event union; the reducer's output is the message list.
 
+Styling is Tailwind 4 — no config file, the theme is `@theme` inside `styles.css`. That file
+also keeps four hand-written rules that exist only because of the comments above them: the
+flex-shrink guard, the sticky approval card, `100dvh` plus the keyboard inset, and the 16px
+prompt input. See [DECISIONS #20](DECISIONS.md). Delete any of them and something breaks
+silently and expensively.
+
 All server calls go through a single `api.ts`. When URLs eventually gain a workspace prefix,
 that's one file.
 

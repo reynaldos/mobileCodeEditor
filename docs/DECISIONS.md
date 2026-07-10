@@ -357,3 +357,41 @@ ship a rendering framework into a container whose job is running an agent is a b
 **Would change our mind:** the multi-tenant product (see #13), which wants a marketing site,
 auth, and billing. Next is the right base for *that*. It shares a UI with this project and
 almost nothing else.
+
+---
+
+## 20. Tailwind for everything except the rules that need a reason
+
+Phase 0 shipped 380 lines of hand-written CSS while the stack table said Tailwind. The
+divergence was never argued, just drifted into. Reconciled in favour of Tailwind 4, with a
+deliberate exception.
+
+**Why Tailwind wins here.** Not because the app is large — six components is nothing. Because
+`fitnessTracker` is shadcn and Tailwind, so it's the stack you're fluent in, and this is a
+tool you will keep tweaking. If changing the padding on a card means learning someone else's
+class names, you stop touching the UI. That is the same argument that decided #19, pointing
+the other way.
+
+Tailwind 4 needs no config file: the theme is `@theme` in `styles.css`, and
+`@tailwindcss/vite` scans sources automatically.
+
+**Why some CSS stays.** A handful of rules exist *only* because of the paragraph above them:
+
+- `.messages > * { flex-shrink: 0 }` — an overflowing flex column shrinks items toward their
+  automatic minimum size, and `overflow: hidden` makes that minimum zero, so the approval card
+  collapses to a hairline. This happened. It cost an evening.
+- `.approval-pending { position: sticky }` — a pending approval blocks the agent, and
+  permission prompts have no deadline. A card that scrolls out of reach hangs the agent.
+- `.app { height: 100dvh; padding-bottom: var(--keyboard-inset) }` — `100vh` is a lie whenever
+  the virtual keyboard is open.
+- `.prompt-input { font-size: 16px }` — anything smaller makes iOS Safari zoom on focus and
+  never zoom back.
+
+Expressed as `[&>*]:shrink-0` in JSX, those comments would live next to the markup they don't
+describe, or not at all — and the next person deletes them. Four rules, four paragraphs, one
+file.
+
+**A hazard worth knowing.** A misspelled utility emits nothing and fails silently. We shipped
+`overflow-wrap-anywhere` (not a real class) and caught it only by grepping the built CSS.
+Nothing in the toolchain will tell you. When a style mysteriously doesn't apply, check the
+generated stylesheet before you debug anything else.

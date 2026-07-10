@@ -98,7 +98,7 @@ was chosen against.
 
 ## Stack
 
-React + Vite PWA · CodeMirror 6 · xterm.js · Fastify · `@anthropic-ai/claude-agent-sdk` ·
+React + Vite PWA · Tailwind 4 · CodeMirror 6 · xterm.js · Fastify · `@anthropic-ai/claude-agent-sdk` ·
 better-sqlite3 · node-pty · ripgrep · `gh` · Docker · Tailscale
 
 ## Scope

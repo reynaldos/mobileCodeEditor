@@ -24,11 +24,14 @@ export function PromptBox(): React.JSX.Element {
   }
 
   return (
-    <div className="prompt">
-      {error && <p className="prompt-error">{error}</p>}
-      <div className="prompt-row">
+    // `prompt-bar` is targeted by a :has() rule that drops the safe-area padding
+    // once the keyboard has lifted the app. See styles.css.
+    <div className="prompt-bar shrink-0 border-t border-line bg-panel px-3 pt-2.5 pb-[calc(10px+env(safe-area-inset-bottom,0px))]">
+      {error && <p className="mb-2 text-[13px] text-del">{error}</p>}
+
+      <div className="flex items-end gap-2">
         <textarea
-          className="prompt-input"
+          className="prompt-input max-h-40 min-h-11 flex-1 resize-none rounded-xl border border-line bg-panel-2 px-3 py-2.5 text-fg outline-none focus:border-accent"
           value={text}
           rows={1}
           placeholder="What should Claude do?"
@@ -41,7 +44,7 @@ export function PromptBox(): React.JSX.Element {
           }}
         />
         <button
-          className="btn btn-send"
+          className="min-h-11 w-18 shrink-0 rounded-xl border border-accent bg-accent font-semibold text-[#06101f] disabled:opacity-50"
           disabled={sending || !text.trim()}
           onClick={() => void submit()}
         >
