@@ -86,6 +86,18 @@ This is the decision the rest of the architecture hangs from:
 That last property is what makes "MVP and build up" honest rather than a euphemism for a
 rewrite in three months.
 
+**One writer, and it is now enforced.** The global monotonic `seq`, the boot recovery that
+closes open sessions as `interrupted`, and `pendingApprovals()` meaning "promises *this*
+process lost" all assume exactly one server owns the log. That assumption was unenforced,
+and `node --watch` broke it immediately: the replacement process booted before the old one
+finished dying, ran boot recovery, and expired an approval that was still live in the
+predecessor. The log ended up with an `approval_expired` and a contradictory
+`approval_decision` for the same id, and one session ended twice.
+
+SQLite's WAL kept the file intact through that. It did not keep the meaning intact.
+`lock.ts` now takes an exclusive `O_EXCL` lock beside the database before anything reads
+it, waits out a dying predecessor, and reclaims the lock if the holder's pid is gone.
+
 **Corollary:** Claude's own `session_id` and our event log are *two different histories*.
 Claude's is its conversation context, used for `resume`. Ours is the render log for the
 UI, a superset holding approvals, file opens, and terminal output. Conflating them means

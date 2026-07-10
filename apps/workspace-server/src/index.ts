@@ -1,11 +1,18 @@
 import { loadConfig, secretsOf } from './config.ts'
 import { openDb } from './db.ts'
+import { acquireLock } from './lock.ts'
 import { EventLog } from './log.ts'
 import { makeRedactor } from './redact.ts'
 import { buildServer } from './server.ts'
 import { SessionManager } from './session-manager.ts'
 
 const config = loadConfig()
+
+// Before anything touches the log. Boot recovery is about to declare every open
+// session "interrupted" — it must be the only process able to say so.
+// Waits briefly for a predecessor to exit, which is what `node --watch` needs.
+const lock = await acquireLock(`${config.dbPath}.lock`)
+
 const db = openDb(config.dbPath)
 const log = new EventLog(db, makeRedactor(secretsOf(config)))
 const sessions = new SessionManager(log, config)
@@ -34,6 +41,7 @@ for (const signal of ['SIGINT', 'SIGTERM'] as const) {
       await sessions.shutdown()
       await app.close()
       db.close()
+      lock.release()
       process.exit(0)
     })()
   })

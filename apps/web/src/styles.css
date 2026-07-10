@@ -148,6 +148,17 @@ body {
   gap: 10px;
 }
 
+/*
+ * Do not delete. In an overflowing flex column, items shrink toward their
+ * automatic minimum size — and `overflow: hidden` (which .card and .diff-body
+ * both set) makes that minimum ZERO. The approval card was being crushed to a
+ * one-pixel line while the text bubbles held at min-content, so the single most
+ * important element in the app rendered as a hairline.
+ */
+.messages > * {
+  flex-shrink: 0;
+}
+
 .empty {
   color: var(--muted);
   text-align: center;
