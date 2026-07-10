@@ -1,0 +1,28 @@
+# Tailscale runs on the HOST, not in here. Ports bind to loopback; `tailscale
+# serve` terminates TLS in front of them. Nothing is publicly exposed, and
+# tailnet membership is the authentication story. See DECISIONS #12.
+#
+#   tailscale serve --bg https / http://127.0.0.1:3000
+#   tailscale serve --bg https:5173 http://127.0.0.1:5173
+#
+# HTTPS certificates must be enabled in the tailnet admin console under DNS.
+# It is off by default, nothing tells you, and it fails as a certificate error
+# that looks like your bug.
+
+services:
+  workspace:
+    build: .
+    restart: unless-stopped
+    ports:
+      # Loopback only. Tailscale is the front door.
+      - '127.0.0.1:3000:3000'
+      # One HTTPS port per project for previews — never a path prefix, which
+      # breaks on absolute asset paths like /assets/index.js. See DECISIONS #16.
+      - '127.0.0.1:5173:5173'
+    volumes:
+      - ./projects:/projects
+      - ./data:/data
+      # Mode 0600 on the host. Holds CLAUDE_CODE_OAUTH_TOKEN and GH_TOKEN.
+      - ./config:/config:ro
+    environment:
+      PROJECT_PATH: /projects/app

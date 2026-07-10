@@ -9,7 +9,38 @@ with inline diffs you approve with your thumb — not an editor.
 
 ## Status
 
-Pre-implementation. Design is settled; nothing is built.
+**Phase 0 is built.** Event log, SSE with resume, the approval bridge, and the client are
+in and tested. Not yet run against a real repo with a real token — that's your move.
+
+## Quickstart
+
+```bash
+pnpm install
+cp .env.example .env          # set PROJECT_PATH; add CLAUDE_CODE_OAUTH_TOKEN
+pnpm dev                      # workspace server on :3000
+
+# in another terminal
+cd apps/web && VITE_API_BASE=http://localhost:3000 pnpm dev
+```
+
+Mint the token with `claude setup-token` on a machine where you can finish the browser
+OAuth flow. It rides your existing subscription — no API billing.
+
+The server starts happily **without** a token: the log, the SSE stream, and the debug
+injector all work, and only `POST /api/prompt` returns a 503. That's deliberate, so you can
+verify the whole transport before spending anything:
+
+```bash
+curl -N localhost:3000/api/events &
+curl -X POST localhost:3000/api/_debug/event -H 'content-type: application/json' \
+  -d '{"type":"assistant_text","text":"hello from the void"}'
+
+# reconnect from a cursor — this is exactly what your phone does after a lock screen
+curl -N -H 'Last-Event-ID: 1' localhost:3000/api/events
+```
+
+`pnpm -r test` runs 25 tests covering replay semantics, boot recovery, redaction, the
+reducer, and the diff.
 
 ## Shape
 
