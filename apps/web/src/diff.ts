@@ -16,9 +16,19 @@ export interface Row {
 /** Context lines kept either side of a change. More is unreadable at 390px. */
 const CONTEXT = 2
 
+/** The LCS table is O(n·m) cells. Past this, show blocks instead of allocating. */
+const LCS_CELL_BUDGET = 4_000_000
+
 export function lineDiff(before: string, after: string): Row[] {
   const a = before.split('\n')
   const b = after.split('\n')
+
+  if ((a.length + 1) * (b.length + 1) > LCS_CELL_BUDGET) {
+    return [
+      ...a.map((text): Row => ({ kind: 'removed', text })),
+      ...b.map((text): Row => ({ kind: 'added', text })),
+    ]
+  }
   return collapse(backtrack(lcsTable(a, b), a, b))
 }
 

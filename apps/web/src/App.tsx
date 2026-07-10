@@ -47,7 +47,7 @@ export function App(): React.JSX.Element {
         </div>
       )}
 
-      <MessageList items={state.items} />
+      <MessageList items={state.items} projectPath={health?.projectPath} />
       <PromptBox />
     </div>
   )

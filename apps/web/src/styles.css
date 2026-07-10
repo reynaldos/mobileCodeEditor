@@ -210,8 +210,8 @@ body {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  direction: rtl; /* truncate long paths at the front, keep the filename */
-  text-align: left;
+  /* Paths are shown relative to the project root, so they fit. `direction: rtl`
+     was truncating from the front but relocating the leading `/` to the end. */
 }
 
 .turn,
@@ -242,8 +242,27 @@ body {
   background: var(--panel);
   overflow: hidden;
 }
+/*
+ * The agent is blocked on a pending card. If it can scroll out of reach, the UI
+ * can hang the agent — permission prompts have no deadline. So it sticks to the
+ * bottom of the scrollport until you answer it, and its diff scrolls within
+ * itself rather than pushing the buttons off-screen.
+ */
 .approval-pending {
   border-color: var(--warn);
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  background: var(--panel);
+  box-shadow: 0 -14px 28px -14px #000c;
+}
+.approval-pending .diff-body {
+  max-height: 40dvh;
+  overflow-y: auto;
+}
+.approval-pending .command {
+  max-height: 40dvh;
+  overflow-y: auto;
 }
 .approval-allowed {
   opacity: 0.72;
