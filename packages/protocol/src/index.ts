@@ -18,9 +18,16 @@ export interface EventEnvelope {
   ts: number
 }
 
+/**
+ * How the agent authenticated. `oauth` is a `claude setup-token` token riding a
+ * Pro/Max subscription — usage draws on plan limits and is NOT billed per token.
+ * Anything else is a metered API key.
+ */
+export type ApiKeySource = 'user' | 'project' | 'org' | 'temporary' | 'oauth'
+
 export type EventBody =
   /** The agent came up. `claudeSessionId` is what we pass to `resume` after a crash. */
-  | { type: 'session_started'; claudeSessionId: string; model: string }
+  | { type: 'session_started'; claudeSessionId: string; model: string; apiKeySource?: ApiKeySource }
   | { type: 'user_prompt'; text: string }
   /** A complete assistant message. Never a token delta — see DECISIONS #7. */
   | { type: 'assistant_text'; text: string }

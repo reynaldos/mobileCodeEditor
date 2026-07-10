@@ -98,6 +98,11 @@ body {
   color: var(--muted);
   font-variant-numeric: tabular-nums;
 }
+/* Subscription usage is not a bill. Say so rather than showing a bare dollar figure. */
+.cost-plan {
+  color: var(--add);
+  opacity: 0.85;
+}
 
 .conn {
   width: 8px;

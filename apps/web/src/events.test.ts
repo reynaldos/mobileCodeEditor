@@ -1,7 +1,7 @@
 import type { Event, EventBody } from '@mce/protocol'
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { initialState, reduce, type Item, type State } from './events.ts'
+import { initialState, isSubscription, reduce, type Item, type State } from './events.ts'
 
 let seq = 0
 const at = (body: EventBody): Event =>
@@ -110,4 +110,30 @@ test('session_ended is terminal and carries its reason', () => {
   assert.equal(state.agent, 'ended')
   const last = state.items.at(-1)
   assert.equal(last?.kind === 'ended' && last.reason, 'interrupted')
+})
+
+test('apiKeySource=oauth marks the session as subscription-backed, not billed', () => {
+  const state = run([
+    { type: 'session_started', claudeSessionId: 'c1', model: 'opus', apiKeySource: 'oauth' },
+    { type: 'turn_complete', costUsd: 0.239 },
+  ])
+
+  assert.equal(state.apiKeySource, 'oauth')
+  assert.equal(isSubscription(state.apiKeySource), true)
+  // The cost is still tracked — it just isn't a charge.
+  assert.equal(state.costUsd, 0.239)
+})
+
+test('an API key session is billed, and says so', () => {
+  const state = run([{ type: 'session_started', claudeSessionId: 'c1', model: 'opus', apiKeySource: 'user' }])
+  assert.equal(isSubscription(state.apiKeySource), false)
+})
+
+test('a session_started without apiKeySource does not clobber a known one', () => {
+  const state = run([
+    { type: 'session_started', claudeSessionId: 'c1', model: 'opus', apiKeySource: 'oauth' },
+    { type: 'session_ended', reason: 'interrupted' },
+    { type: 'session_started', claudeSessionId: 'c2', model: 'opus' },
+  ])
+  assert.equal(state.apiKeySource, 'oauth')
 })

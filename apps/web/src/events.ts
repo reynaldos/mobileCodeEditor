@@ -1,4 +1,4 @@
-import type { Event } from '@mce/protocol'
+import type { ApiKeySource, Event } from '@mce/protocol'
 
 /**
  * A reducer over the event union. Events in, a renderable conversation out.
@@ -43,7 +43,12 @@ export interface State {
   approvalIndex: Record<string, number>
   lastSeq: number
   agent: AgentState
+  /**
+   * What the tokens would cost at API rates. On a subscription this is an
+   * estimate, not a charge — see `apiKeySource`.
+   */
   costUsd: number
+  apiKeySource: ApiKeySource | undefined
   sessionId: string | null
 }
 
@@ -54,8 +59,12 @@ export const initialState: State = {
   lastSeq: 0,
   agent: 'idle',
   costUsd: 0,
+  apiKeySource: undefined,
   sessionId: null,
 }
+
+/** True when usage draws on a Pro/Max plan rather than being billed per token. */
+export const isSubscription = (source: ApiKeySource | undefined): boolean => source === 'oauth'
 
 /** Replaces one item without mutating the array. */
 function replace(items: Item[], index: number, next: Item): Item[] {
@@ -73,7 +82,12 @@ export function reduce(state: State, event: Event): State {
 
   switch (event.type) {
     case 'session_started':
-      return { ...base, agent: 'thinking', sessionId: event.sessionId }
+      return {
+        ...base,
+        agent: 'thinking',
+        sessionId: event.sessionId,
+        apiKeySource: event.apiKeySource ?? state.apiKeySource,
+      }
 
     case 'user_prompt':
       return { ...base, agent: 'thinking', items: [...state.items, { kind: 'user', key, text: event.text }] }

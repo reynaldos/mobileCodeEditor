@@ -211,6 +211,9 @@ export class AgentSession {
           type: 'session_started',
           claudeSessionId: message.session_id,
           model: message.model,
+          // 'oauth' means a setup-token riding the subscription. The client uses
+          // this to stop presenting `total_cost_usd` as a bill.
+          apiKeySource: message.apiKeySource,
         })
         return
       }
