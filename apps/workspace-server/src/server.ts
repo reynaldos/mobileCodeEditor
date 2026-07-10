@@ -36,7 +36,7 @@ export async function buildServer(
     agentReady: Boolean(config.claudeToken),
   }))
 
-  registerEvents(app, log)
+  registerEvents(app, log, config)
   registerPrompt(app, sessions)
   registerApprovals(app, sessions)
   registerDebug(app, log, config)
