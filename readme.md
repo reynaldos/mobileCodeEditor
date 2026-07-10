@@ -17,11 +17,20 @@ in and tested. Not yet run against a real repo with a real token — that's your
 ```bash
 pnpm install
 cp .env.example .env          # set PROJECT_PATH; add CLAUDE_CODE_OAUTH_TOKEN
-pnpm dev                      # workspace server on :3000
-
-# in another terminal
-cd apps/web && VITE_API_BASE=http://localhost:3000 pnpm dev
 ```
+
+Two terminals, both in the repo root:
+
+```bash
+pnpm dev        # terminal 1 — workspace server + agent, :3000
+pnpm dev:web    # terminal 2 — client with hot reload,   :5173
+```
+
+Open **`localhost:5173`**. The API base is set in `apps/web/.env.development`, so nothing
+needs exporting.
+
+Only the first terminal matters in production: the workspace server serves the built client
+from its own origin, there is no Vite, no second port, and no CORS.
 
 Mint the token with `claude setup-token` on a machine where you can finish the browser
 OAuth flow. It rides your existing subscription — no API billing.
