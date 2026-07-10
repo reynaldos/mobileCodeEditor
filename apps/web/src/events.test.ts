@@ -1,7 +1,7 @@
 import type { Event, EventBody } from '@mce/protocol'
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { initialState, isSubscription, reduce, type Item, type State } from './events.ts'
+import { initialState, reduce, type Item, type State } from './events.ts'
 
 let seq = 0
 const at = (body: EventBody): Event =>
@@ -26,7 +26,6 @@ test('a full turn renders in order', () => {
 
   assert.deepEqual(kinds(state), ['user', 'assistant', 'tool', 'turn'])
   assert.equal(state.agent, 'awaiting_input')
-  assert.equal(state.costUsd, 0.012)
   assert.equal(state.sessionId, 's1')
 })
 
@@ -112,28 +111,15 @@ test('session_ended is terminal and carries its reason', () => {
   assert.equal(last?.kind === 'ended' && last.reason, 'interrupted')
 })
 
-test('apiKeySource=oauth marks the session as subscription-backed, not billed', () => {
+test('cost and apiKeySource reach the log but never the rendered state', () => {
   const state = run([
     { type: 'session_started', claudeSessionId: 'c1', model: 'opus', apiKeySource: 'oauth' },
-    { type: 'turn_complete', costUsd: 0.239 },
+    { type: 'turn_complete', costUsd: 0.239, numTurns: 3 },
   ])
 
-  assert.equal(state.apiKeySource, 'oauth')
-  assert.equal(isSubscription(state.apiKeySource), true)
-  // The cost is still tracked — it just isn't a charge.
-  assert.equal(state.costUsd, 0.239)
-})
-
-test('an API key session is billed, and says so', () => {
-  const state = run([{ type: 'session_started', claudeSessionId: 'c1', model: 'opus', apiKeySource: 'user' }])
-  assert.equal(isSubscription(state.apiKeySource), false)
-})
-
-test('a session_started without apiKeySource does not clobber a known one', () => {
-  const state = run([
-    { type: 'session_started', claudeSessionId: 'c1', model: 'opus', apiKeySource: 'oauth' },
-    { type: 'session_ended', reason: 'interrupted' },
-    { type: 'session_started', claudeSessionId: 'c2', model: 'opus' },
-  ])
-  assert.equal(state.apiKeySource, 'oauth')
+  // The events carry them; the UI does not surface them. Analytics is a query
+  // over the log, not a number in a header. See ROADMAP "Usage".
+  assert.equal(kinds(state).at(-1), 'turn')
+  assert.ok(!('costUsd' in state), 'no cost in client state')
+  assert.ok(!('apiKeySource' in state), 'no auth source in client state')
 })

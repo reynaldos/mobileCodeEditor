@@ -63,12 +63,7 @@ function Row({ item, projectPath }: { item: Item; projectPath?: string }): React
     }
 
     case 'turn':
-      return (
-        <div className="turn">
-          <span>done</span>
-          {item.costUsd !== undefined && <span className="cost">${item.costUsd.toFixed(4)}</span>}
-        </div>
-      )
+      return <div className="turn">done</div>
 
     case 'ended':
       return (

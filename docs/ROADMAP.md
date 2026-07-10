@@ -158,6 +158,35 @@ Order them by what you actually reach for. You won't be able to predict it now.
 
 ---
 
+## Later — usage and analytics
+
+Deliberately not in the UI, and deliberately already in the log.
+
+The SDK reports `total_cost_usd` per turn: what those tokens would have cost at API rates.
+Because auth is a `claude setup-token` OAuth token riding a Max subscription, nothing is
+billed per token — usage draws on plan limits. A dollar figure in the header is a meter
+reading rendered as an invoice, so the MVP had one and it was removed.
+
+The data is recorded regardless. `turn_complete` and `session_ended` carry `costUsd`,
+`session_started` carries `apiKeySource` (`'oauth'` means subscription). So the whole
+feature is a query:
+
+```sql
+SELECT date(ts/1000, 'unixepoch') AS day,
+       SUM(json_extract(payload, '$.costUsd')) AS est_usd
+  FROM events WHERE type = 'turn_complete' GROUP BY day;
+```
+
+This is the property [DECISIONS #5](DECISIONS.md) was bought for: every table you will ever
+want is a projection of the log. Nothing to migrate, nothing to backfill. When you want
+usage, you write a `SELECT`.
+
+Worth adding then: turns per session, tools per turn, the approve/reject ratio (which tells
+you what your allowlist should be), and time parked awaiting approval. That last one is the
+real metric for whether this thing is pleasant to use.
+
+---
+
 ## Later — many containers
 
 The only genuine cliff. It arrives when two projects want conflicting toolchains: two Node

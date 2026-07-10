@@ -1,4 +1,4 @@
-import type { ApiKeySource, Event } from '@mce/protocol'
+import type { Event } from '@mce/protocol'
 
 /**
  * A reducer over the event union. Events in, a renderable conversation out.
@@ -31,7 +31,7 @@ export type Item =
       status: 'pending' | 'allowed' | 'denied' | 'expired'
       reason?: string
     }
-  | { kind: 'turn'; key: string; costUsd?: number }
+  | { kind: 'turn'; key: string }
   | { kind: 'ended'; key: string; reason: string; message?: string }
 
 export type AgentState = 'idle' | 'thinking' | 'awaiting_approval' | 'awaiting_input' | 'ended'
@@ -43,28 +43,28 @@ export interface State {
   approvalIndex: Record<string, number>
   lastSeq: number
   agent: AgentState
-  /**
-   * What the tokens would cost at API rates. On a subscription this is an
-   * estimate, not a charge — see `apiKeySource`.
-   */
-  costUsd: number
-  apiKeySource: ApiKeySource | undefined
   sessionId: string | null
 }
 
+/**
+ * No cost in this state, deliberately.
+ *
+ * Usage runs on a Claude subscription, so `total_cost_usd` is what the tokens
+ * would have cost at API rates — a meter reading, not an invoice. Showing it in
+ * a header makes it read as money spent.
+ *
+ * The log still records `costUsd` on turn_complete and session_ended, and
+ * `apiKeySource` on session_started. Usage analytics is a query over the log,
+ * which is exactly the property the log exists for. See ROADMAP "Usage".
+ */
 export const initialState: State = {
   items: [],
   toolIndex: {},
   approvalIndex: {},
   lastSeq: 0,
   agent: 'idle',
-  costUsd: 0,
-  apiKeySource: undefined,
   sessionId: null,
 }
-
-/** True when usage draws on a Pro/Max plan rather than being billed per token. */
-export const isSubscription = (source: ApiKeySource | undefined): boolean => source === 'oauth'
 
 /** Replaces one item without mutating the array. */
 function replace(items: Item[], index: number, next: Item): Item[] {
@@ -82,12 +82,7 @@ export function reduce(state: State, event: Event): State {
 
   switch (event.type) {
     case 'session_started':
-      return {
-        ...base,
-        agent: 'thinking',
-        sessionId: event.sessionId,
-        apiKeySource: event.apiKeySource ?? state.apiKeySource,
-      }
+      return { ...base, agent: 'thinking', sessionId: event.sessionId }
 
     case 'user_prompt':
       return { ...base, agent: 'thinking', items: [...state.items, { kind: 'user', key, text: event.text }] }
@@ -165,12 +160,7 @@ export function reduce(state: State, event: Event): State {
     }
 
     case 'turn_complete':
-      return {
-        ...base,
-        agent: 'awaiting_input',
-        costUsd: event.costUsd ?? state.costUsd,
-        items: [...state.items, { kind: 'turn', key, costUsd: event.costUsd }],
-      }
+      return { ...base, agent: 'awaiting_input', items: [...state.items, { kind: 'turn', key }] }
 
     case 'session_ended':
       return {
