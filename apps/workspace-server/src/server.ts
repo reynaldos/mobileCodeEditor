@@ -4,18 +4,25 @@ import Fastify, { type FastifyInstance } from 'fastify'
 import { existsSync } from 'node:fs'
 import type { Config } from './config.ts'
 import type { EventLog } from './log.ts'
+import type { Pusher } from './push.ts'
+import type { PushStore } from './push-store.ts'
 import { registerApprovals } from './routes/approvals.ts'
 import { registerConversations } from './routes/conversations.ts'
 import { registerDebug } from './routes/debug.ts'
 import { registerEvents } from './routes/events.ts'
 import { registerPrompt } from './routes/prompt.ts'
+import { registerPush } from './routes/push.ts'
 import type { SessionManager } from './session-manager.ts'
 
-export async function buildServer(
-  config: Config,
-  log: EventLog,
-  sessions: SessionManager,
-): Promise<FastifyInstance> {
+export interface Services {
+  log: EventLog
+  sessions: SessionManager
+  pushStore: PushStore
+  pusher: Pusher
+}
+
+export async function buildServer(config: Config, services: Services): Promise<FastifyInstance> {
+  const { log, sessions, pushStore, pusher } = services
   const app = Fastify({
     logger: config.isDev
       ? { transport: { target: 'pino-pretty', options: { translateTime: 'HH:MM:ss' } } }
@@ -37,12 +44,14 @@ export async function buildServer(
     // The conversation your next prompt would continue. null means a clean start.
     resumes: sessions.resumableConversationId ?? null,
     agentReady: Boolean(config.claudeToken),
+    pushReady: pusher.enabled,
   }))
 
   registerEvents(app, log, config)
   registerPrompt(app, sessions)
   registerApprovals(app, sessions)
   registerConversations(app, sessions)
+  registerPush(app, config, pushStore, pusher)
   registerDebug(app, log, config)
 
   // Serving the PWA from this same origin is what deletes CORS, mixed content,

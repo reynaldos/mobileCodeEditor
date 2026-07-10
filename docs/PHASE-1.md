@@ -192,16 +192,30 @@ buzzes. Coalesce within a short window.
 
 ---
 
-## Acceptance test
+## Acceptance test — PASSED
 
 > Send a prompt from the phone. **Lock it and put it in your pocket.** When Claude hits an
 > `Edit`, the phone buzzes. Tap the notification; the app opens directly on the pending
 > approval card. Approve it with your thumb. Lock the phone again. When the turn finishes,
 > it buzzes once more.
 
-At no point do you watch a screen waiting.
+Verified on-device over Tailscale: the installed PWA subscribed after one tap of Enable, and
+a push arrived with Safari backgrounded and the phone locked.
 
-That is the difference between a thing that works and a thing you use.
+At no point do you watch a screen waiting. That is the difference between a thing that works
+and a thing you use.
+
+### What the build turned up
+
+- **The notifier counted itself as a watcher.** It subscribes to the log to *send* pushes, so
+  `subscriberCount` was never zero while it ran, and `turn_complete` would have notified
+  nobody. A test caught it. Watchers (SSE connections) and internal listeners are now counted
+  separately — `log.watcherCount` vs `log.subscriberCount`.
+- **web-push validates VAPID keys in its constructor.** Placeholder keys in a unit test throw
+  before the injected sender runs, so `Pusher` skips `setVapidDetails` when a fake `send` is
+  supplied. Validating keys is not that constructor's job; sending is.
+- **`Uint8Array` is generic as of TS 5.7.** `new Uint8Array(n)` is `ArrayBufferLike` and does
+  not satisfy `BufferSource`; back it with an explicit `ArrayBuffer`.
 
 ---
 

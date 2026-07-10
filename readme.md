@@ -16,10 +16,15 @@ work; nothing was lost.
 
 Installed to the home screen, which is also the context iOS requires for Phase 1's web push.
 
-Not done, and deliberately so: the container. `docker build` has never once been run. Docker
-buys durability, not the answer to the question Phase 0 existed to ask.
+**Phase 1 is done.** Web push works end to end: the installed PWA subscribes, and when Claude
+hits an approval the phone buzzes even with Safari backgrounded and the screen locked. Tapping
+the notification opens straight to the pending card. Verified on-device over Tailscale.
 
-Next: a **New conversation** button, then push notifications. See [ROADMAP.md](docs/ROADMAP.md).
+Not done, and deliberately so: the container. `docker build` has never once been run. Docker
+buys durability, not the answer these phases existed to ask.
+
+Next: the file browser and a real editor (Phase 3), or the terminal — whatever you reach for
+first. See [ROADMAP.md](docs/ROADMAP.md).
 
 ## Quickstart
 

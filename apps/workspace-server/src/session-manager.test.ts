@@ -20,6 +20,7 @@ const CONFIG: Config = {
   model: undefined,
   isDev: true,
   webDist: '/nonexistent',
+  vapid: undefined,
 }
 
 const init = (sessionId: string): SDKMessage =>

@@ -6,6 +6,8 @@ import { after, test } from 'node:test'
 import type { Config } from './config.ts'
 import { openDb } from './db.ts'
 import { EventLog } from './log.ts'
+import { Pusher } from './push.ts'
+import { PushStore } from './push-store.ts'
 import { makeRedactor } from './redact.ts'
 import { buildServer } from './server.ts'
 import { SessionManager } from './session-manager.ts'
@@ -28,6 +30,7 @@ const DEV: Config = {
   model: undefined,
   isDev: true,
   webDist: '/nonexistent-so-static-serving-is-skipped',
+  vapid: undefined,
 }
 
 const teardown: Array<() => Promise<void>> = []
@@ -36,8 +39,15 @@ after(async () => {
 })
 
 async function boot(config: Config = DEV): Promise<{ base: string; log: EventLog }> {
-  const log = new EventLog(openDb(':memory:'), makeRedactor([]))
-  const app = await buildServer(config, log, new SessionManager(log, config))
+  const db = openDb(':memory:')
+  const log = new EventLog(db, makeRedactor([]))
+  const pushStore = new PushStore(db)
+  const app = await buildServer(config, {
+    log,
+    sessions: new SessionManager(log, config),
+    pushStore,
+    pusher: new Pusher(pushStore, config.vapid),
+  })
   app.log.level = 'silent'
 
   await app.listen({ port: 0, host: '127.0.0.1' })

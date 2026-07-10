@@ -21,6 +21,16 @@ export interface Config {
   readonly isDev: boolean
   /** The PWA build. Served from this same origin, which is why CORS exists only in dev. */
   readonly webDist: string
+  /** Web push. Absent means push is disabled — the server boots fine without it. */
+  readonly vapid: VapidConfig | undefined
+}
+
+export interface VapidConfig {
+  /** Safe to expose. The client fetches it to build a subscription. */
+  readonly publicKey: string
+  readonly privateKey: string
+  /** A `mailto:` or `https:` URL identifying the sender to the push service. */
+  readonly subject: string
 }
 
 class ConfigError extends Error {}
@@ -54,7 +64,18 @@ export function loadConfig(): Config {
     model: process.env.ANTHROPIC_MODEL?.trim() || undefined,
     isDev: process.env.NODE_ENV !== 'production',
     webDist: resolve(process.env.WEB_DIST ?? new URL('../../web/dist', import.meta.url).pathname),
+    vapid: loadVapid(),
   }
+}
+
+/** All three or nothing. A half-configured keypair can't send a push, so treat it as off. */
+function loadVapid(): VapidConfig | undefined {
+  const publicKey = process.env.VAPID_PUBLIC_KEY?.trim()
+  const privateKey = process.env.VAPID_PRIVATE_KEY?.trim()
+  const subject = process.env.VAPID_SUBJECT?.trim()
+
+  if (!publicKey || !privateKey || !subject) return undefined
+  return { publicKey, privateKey, subject }
 }
 
 /**
@@ -75,7 +96,10 @@ export function assertAgentCredentials(config: Config): void {
 
 /** Values scrubbed from every event payload before it is written. See log.ts. */
 export function secretsOf(config: Config): string[] {
-  return [config.claudeToken, process.env.GH_TOKEN, process.env.ANTHROPIC_API_KEY].filter(
-    (s): s is string => typeof s === 'string' && s.length >= 8,
-  )
+  return [
+    config.claudeToken,
+    config.vapid?.privateKey,
+    process.env.GH_TOKEN,
+    process.env.ANTHROPIC_API_KEY,
+  ].filter((s): s is string => typeof s === 'string' && s.length >= 8)
 }

@@ -25,6 +25,7 @@ const CONFIG: Config = {
   model: undefined,
   isDev: true,
   webDist: '/nonexistent',
+  vapid: undefined,
 }
 
 // The SDK message union has ~38 variants; we construct the five we map.

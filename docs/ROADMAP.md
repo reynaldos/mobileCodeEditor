@@ -88,25 +88,16 @@ exists.
 
 ---
 
-## Phase 1 — Push notifications
+## ~~Phase 1 — Push notifications~~ — done
 
-**Why first.** Phase 0 proved the loop works. Using it exposes what the loop cannot fix on
-its own: you send a prompt, pocket the phone, and Claude parks on an approval — waiting for a
-person who isn't looking at the screen. Permission prompts have no deadline. It waits forever.
+Web push from a home-screen-installed PWA. Notifies on `approval_request` always, on
+`turn_complete` only when nobody is watching (no live SSE connection), and on a session
+error; a debounce coalesces an approval burst into one buzz. Verified on-device over
+Tailscale — a push arrives with Safari backgrounded and the phone locked.
 
-Every other feature makes the app bigger. This one makes it *usable*.
-
-Web push from a home-screen-installed PWA, iOS 16.4+. Notifies on `approval_request` always,
-on `turn_complete` only when nobody is watching, and deep-links to the pending card.
-
-**Done when** you start a refactor, put your phone in your pocket, and get tapped on the
-shoulder when Claude needs you.
-
-Full plan: **[PHASE-1.md](PHASE-1.md)**.
-
-**Take a baseline first.** Time parked awaiting approval is computable from the log today —
-`approval_request` to `approval_decision`. Measure it before you build the thing meant to
-shrink it.
+Subscriptions are a **table**, not events (see [PHASE-1.md](PHASE-1.md) for why), so their
+per-device secrets never touch the log. The full write-up, including the three bugs the build
+turned up, is in [PHASE-1.md](PHASE-1.md).
 
 ---
 

@@ -13,6 +13,16 @@ interface Row {
 
 type Listener = (event: Event) => void
 
+interface SubscribeOptions {
+  /**
+   * Does this subscriber count as a human watching? An SSE connection does; the
+   * Notifier, which subscribes only to *send* notifications, does not — and if it
+   * counted itself, "nobody is watching" would never be true and turn_complete
+   * would never notify. Defaults to true, so the SSE route needs no change.
+   */
+  watcher?: boolean
+}
+
 /**
  * Append-only. One writer. The only durable state on this server.
  *
@@ -24,6 +34,7 @@ export class EventLog {
   readonly #db: Db
   readonly #redact: Redactor
   readonly #listeners = new Set<Listener>()
+  #watchers = 0
 
   constructor(db: Db, redact: Redactor) {
     this.#db = db
@@ -72,13 +83,28 @@ export class EventLog {
     return row.seq ?? 0
   }
 
-  subscribe(listener: Listener): () => void {
+  subscribe(listener: Listener, opts: SubscribeOptions = {}): () => void {
     this.#listeners.add(listener)
-    return () => this.#listeners.delete(listener)
+    const isWatcher = opts.watcher ?? true
+    if (isWatcher) this.#watchers++
+
+    let unsubscribed = false
+    return () => {
+      if (unsubscribed) return // guard double-unsubscribe against a double decrement
+      unsubscribed = true
+      this.#listeners.delete(listener)
+      if (isWatcher) this.#watchers--
+    }
   }
 
+  /** Total listeners, watchers or not. For diagnostics. */
   get subscriberCount(): number {
     return this.#listeners.size
+  }
+
+  /** Live SSE connections — humans who could see the screen right now. */
+  get watcherCount(): number {
+    return this.#watchers
   }
 
   /**

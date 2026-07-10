@@ -27,6 +27,21 @@ const MIGRATIONS: readonly string[] = [
   CREATE INDEX events_session ON events (session_id, seq);
   CREATE INDEX events_type    ON events (type);
   `,
+  // Migration #2: web push (Phase 1).
+  //
+  // A device registration is NOT a projection of the log — it is new input, it is
+  // mutable, and endpoints expire (410 Gone). So it is a table, not an event.
+  // See DECISIONS #5 and PHASE-1.md. The p256dh/auth secrets live here and never
+  // pass through the event log or the redactor.
+  `
+  CREATE TABLE push_subscriptions (
+    endpoint   TEXT PRIMARY KEY,
+    p256dh     TEXT    NOT NULL,
+    auth       TEXT    NOT NULL,
+    created_at INTEGER NOT NULL,
+    last_ok_at INTEGER
+  );
+  `,
 ]
 
 export function openDb(path: string): Db {

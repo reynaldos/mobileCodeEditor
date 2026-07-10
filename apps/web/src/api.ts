@@ -62,6 +62,21 @@ export async function decideApproval(
   } satisfies ApprovalRequest)
 }
 
+/** The server's public VAPID key, fetched at enable time so key rotation is server-only. */
+export async function getPushKey(): Promise<{ key: string }> {
+  const response = await fetch(`${BASE}/api/push/key`)
+  if (!response.ok) throw new ApiError(response.status, 'push is not configured')
+  return (await response.json()) as { key: string }
+}
+
+export async function subscribePush(subscription: unknown): Promise<void> {
+  await post<void>('/api/push/subscribe', subscription)
+}
+
+export async function unsubscribePush(endpoint: string): Promise<void> {
+  await post<void>('/api/push/unsubscribe', { endpoint })
+}
+
 export interface Health {
   ok: boolean
   projectId: string
@@ -69,6 +84,7 @@ export interface Health {
   lastSeq: number
   sessionId: string | null
   agentReady: boolean
+  pushReady: boolean
 }
 
 export async function fetchHealth(): Promise<Health> {
