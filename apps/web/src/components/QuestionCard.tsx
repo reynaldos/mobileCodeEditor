@@ -8,16 +8,21 @@ type QuestionItem = Extract<Item, { kind: 'question' }>
 
 /**
  * The agent's AskUserQuestion, answered inline. Like the approval card, it blocks
- * the turn and sticks to the bottom while pending. Single- or multi-select per
- * question, plus a freeform "Other". Answers post back keyed by question text.
+ * the turn and sticks to the bottom while pending. Questions are shown one at a
+ * time behind a tab strip: picking a single-select answer auto-advances to the
+ * next unanswered tab, and any tab can be revisited to change its answer.
+ * Single- or multi-select per question, plus a freeform "Other". Answers post
+ * back keyed by question text.
  */
 export function QuestionCard({ item }: { item: QuestionItem }): React.JSX.Element {
   const [picks, setPicks] = useState<Record<number, string[]>>({})
   const [other, setOther] = useState<Record<number, string>>({})
+  const [active, setActive] = useState(0)
   const [sending, setSending] = useState(false)
   const [error, setError] = useState<string | undefined>()
 
   const pending = item.status === 'pending'
+  const activeIndex = Math.min(active, item.questions.length - 1)
 
   function valueFor(i: number): string {
     const chosen = picks[i] ?? []
@@ -35,7 +40,15 @@ export function QuestionCard({ item }: { item: QuestionItem }): React.JSX.Elemen
       }
       return { ...prev, [i]: [label] }
     })
-    if (!multi) setOther((prev) => ({ ...prev, [i]: '' }))
+    if (!multi) {
+      setOther((prev) => ({ ...prev, [i]: '' }))
+      // Single-select answers are complete in one click — jump to the next
+      // question that still needs an answer (or just the next tab).
+      setActive((prevActive) => {
+        if (prevActive !== i || i >= item.questions.length - 1) return prevActive
+        return i + 1
+      })
+    }
   }
 
   function changeOther(i: number, text: string, multi: boolean): void {
@@ -73,20 +86,66 @@ export function QuestionCard({ item }: { item: QuestionItem }): React.JSX.Elemen
         {pending ? 'Claude is asking' : item.status === 'answered' ? 'Answered' : 'Question dismissed'}
       </div>
 
-      <div className="flex flex-col gap-4 p-3">
+      <div className="flex flex-col gap-3 p-3">
+        {item.questions.length > 1 && (
+          <div className="flex flex-wrap gap-1.5" role="tablist">
+            {item.questions.map((q, i) => {
+              const answered = valueFor(i).length > 0
+              const current = i === activeIndex
+              return (
+                <button
+                  key={i}
+                  role="tab"
+                  aria-selected={current}
+                  className={`flex min-h-8 items-center gap-1 rounded-full border px-2.5 text-[12px] ${
+                    current
+                      ? 'border-accent bg-accent/10 text-fg'
+                      : answered
+                        ? 'border-line bg-panel-2 text-fg'
+                        : 'border-line bg-panel-2 text-muted'
+                  }`}
+                  onClick={() => setActive(i)}
+                >
+                  {answered && <Check className="size-3" />}
+                  {q.header || `Q${i + 1}`}
+                </button>
+              )
+            })}
+          </div>
+        )}
+
         {item.questions.map((q, i) => (
-          <QuestionBlock
-            key={i}
-            q={q}
-            index={i}
-            picks={picks[i] ?? []}
-            other={other[i] ?? ''}
-            answer={item.status === 'answered' ? item.answers?.[q.question] : undefined}
-            disabled={!pending || sending}
-            onChoose={(label) => choose(i, label, q.multiSelect)}
-            onOther={(text) => changeOther(i, text, q.multiSelect)}
-          />
+          <div key={i} className={i === activeIndex ? '' : 'hidden'}>
+            <QuestionBlock
+              q={q}
+              picks={picks[i] ?? []}
+              other={other[i] ?? ''}
+              answer={item.status === 'answered' ? item.answers?.[q.question] : undefined}
+              disabled={!pending || sending}
+              onChoose={(label) => choose(i, label, q.multiSelect)}
+              onOther={(text) => changeOther(i, text, q.multiSelect)}
+            />
+          </div>
         ))}
+
+        {pending && item.questions.length > 1 && (
+          <div className="flex gap-2">
+            <button
+              className="min-h-9 flex-1 rounded-[10px] border border-line bg-panel-2 text-[13px] text-fg disabled:opacity-40"
+              disabled={activeIndex === 0}
+              onClick={() => setActive((i) => Math.max(0, i - 1))}
+            >
+              Back
+            </button>
+            <button
+              className="min-h-9 flex-1 rounded-[10px] border border-line bg-panel-2 text-[13px] text-fg disabled:opacity-40"
+              disabled={activeIndex >= item.questions.length - 1}
+              onClick={() => setActive((i) => Math.min(item.questions.length - 1, i + 1))}
+            >
+              Next
+            </button>
+          </div>
+        )}
 
         {error && <p className="text-[13px] text-del">{error}</p>}
 
@@ -106,7 +165,6 @@ export function QuestionCard({ item }: { item: QuestionItem }): React.JSX.Elemen
 
 function QuestionBlock({
   q,
-  index,
   picks,
   other,
   answer,
@@ -115,7 +173,6 @@ function QuestionBlock({
   onOther,
 }: {
   q: Question
-  index: number
   picks: string[]
   other: string
   answer?: string
@@ -124,7 +181,7 @@ function QuestionBlock({
   onOther: (text: string) => void
 }): React.JSX.Element {
   return (
-    <div className={index > 0 ? 'border-t border-line pt-4' : ''}>
+    <div>
       {q.header && (
         <span className="mb-1.5 inline-block rounded border border-line px-1.5 py-px text-[10px] uppercase tracking-wide text-muted">
           {q.header}
