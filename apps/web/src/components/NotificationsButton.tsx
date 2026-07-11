@@ -1,3 +1,4 @@
+import { Bell } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { currentPushState, enablePush, type PushState } from '../push.ts'
 
@@ -31,8 +32,12 @@ export function NotificationsButton(): React.JSX.Element | null {
     // nothing, so show a hint instead of a broken control.
     return (
       <>
-        <button className={`${CHIP} border-line bg-panel-2 text-muted`} onClick={() => setHint((h) => !h)}>
-          🔔
+        <button
+          className={`${CHIP} flex items-center border-line bg-panel-2 text-muted`}
+          aria-label="Notifications"
+          onClick={() => setHint((h) => !h)}
+        >
+          <Bell className="size-4" />
         </button>
         {hint && (
           <span className="absolute right-3 top-14 z-10 max-w-[240px] rounded-lg border border-line bg-panel-2 p-2.5 text-xs text-muted shadow-lg">
@@ -55,12 +60,13 @@ export function NotificationsButton(): React.JSX.Element | null {
 
   return (
     <button
-      className={`${CHIP} border-accent bg-transparent font-medium text-accent`}
+      className={`${CHIP} flex items-center gap-1.5 border-accent bg-transparent font-medium text-accent`}
       disabled={busy}
       onClick={() => void enable()}
       title="Get notified when Claude needs you"
     >
-      {busy ? '…' : '🔔 Enable'}
+      <Bell className="size-4" />
+      {busy ? 'Enabling…' : 'Enable'}
     </button>
   )
 }

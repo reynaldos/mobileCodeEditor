@@ -1,4 +1,5 @@
 import { LEGACY_THREAD_ID } from '@mce/protocol'
+import { ChevronDown, History } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import { fetchHealth, type Health } from './api.ts'
 import { MessageList } from './components/MessageList.tsx'
@@ -75,19 +76,19 @@ export function App(): React.JSX.Element {
       <header className="flex shrink-0 items-center justify-between gap-3 border-b border-line bg-panel px-3.5 pb-2.5 pt-[calc(10px+env(safe-area-inset-top,0px))]">
         <button className="flex min-w-0 items-center gap-1.5" onClick={() => setOverlay('projects')} title="Switch project">
           <span className="truncate font-semibold">{projectName ?? 'Projects'}</span>
-          <span className="shrink-0 text-muted">▾</span>
+          <ChevronDown className="size-4 shrink-0 text-muted" />
           {agent.label && <span className={`shrink-0 text-xs ${agent.className}`}>{agent.label}</span>}
         </button>
 
         <div className="flex shrink-0 items-center gap-2.5">
           {activeProjectId && (
             <button
-              className="text-[17px] leading-none text-muted"
+              className="flex items-center text-muted"
               title="Previous threads"
               aria-label="Previous threads"
               onClick={() => setOverlay('threads')}
             >
-              🕘
+              <History className="size-[18px]" />
             </button>
           )}
           <NotificationsButton />

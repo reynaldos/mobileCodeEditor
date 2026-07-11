@@ -1,4 +1,5 @@
 import type { Thread } from '@mce/protocol'
+import { ChevronLeft } from 'lucide-react'
 
 interface Props {
   projectName: string
@@ -20,8 +21,9 @@ export function ThreadList({ projectName, threads, activeThreadId, onSelect, onN
   return (
     <div className="fixed inset-0 z-20 flex flex-col bg-bg/95 backdrop-blur-sm">
       <header className="flex items-center justify-between border-b border-line px-4 pb-3 pt-[calc(12px+env(safe-area-inset-top,0px))]">
-        <button className="text-[13px] text-muted" onClick={onBack}>
-          ‹ Projects
+        <button className="flex items-center gap-0.5 text-[13px] text-muted" onClick={onBack}>
+          <ChevronLeft className="size-4" />
+          Projects
         </button>
         <span className="truncate font-semibold">{projectName}</span>
         <button

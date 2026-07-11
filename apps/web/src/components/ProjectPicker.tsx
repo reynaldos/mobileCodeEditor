@@ -1,5 +1,6 @@
 import type { GithubRepo, NameCheckResponse, Visibility } from '@mce/protocol'
 import type { Project } from '@mce/protocol'
+import { ChevronDown, ChevronRight } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { ApiError, checkProjectName, createProject, fetchGithubRepos } from '../api.ts'
 import { useDebounced } from '../useDebounced.ts'
@@ -39,7 +40,10 @@ export function ProjectPicker({ projects, activeId, failed, onSelect, onClose }:
               >
                 <div className="flex items-center justify-between">
                   <span className="truncate font-medium">{p.name}</span>
-                  <span className="text-[11px] text-muted">threads ›</span>
+                  <span className="flex shrink-0 items-center text-[11px] text-muted">
+                    threads
+                    <ChevronRight className="size-3.5" />
+                  </span>
                 </div>
                 <div className="mt-0.5 truncate text-[12px] text-muted">
                   {p.repoUrl ?? 'local'} {p.branch ? `· ${p.branch}` : ''}
@@ -191,12 +195,12 @@ function CloneForm({ projects, failed }: { projects: Project[]; failed: Record<s
         ) : (
           // Browse the repos you haven't added yet.
           <button
-            className="min-h-11 w-11 shrink-0 rounded-xl border border-line bg-panel-2 text-muted"
+            className="flex min-h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-line bg-panel-2 text-muted"
             title="Browse your repos"
             aria-label="Browse your repos"
             onClick={() => setBrowsing((b) => !b)}
           >
-            <span className={`inline-block transition-transform ${browsing ? 'rotate-180' : ''}`}>▾</span>
+            <ChevronDown className={`size-4 transition-transform ${browsing ? 'rotate-180' : ''}`} />
           </button>
         )}
       </div>
