@@ -154,6 +154,13 @@ export interface Project {
 
 // --- Threads (Phase 2.5): per-project conversation history -----------------
 
+/**
+ * The id of the legacy bucket — conversations from before threads existed
+ * (thread_id NULL). Read-only: you view it, but continue by starting a new thread.
+ * The one runtime value in this file, deliberately: a sentinel both halves share.
+ */
+export const LEGACY_THREAD_ID = 'legacy-thread'
+
 /** A conversation within a project, derived from the log. */
 export interface Thread {
   id: string
