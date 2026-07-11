@@ -5,7 +5,7 @@ import { ApprovalCard } from './ApprovalCard.tsx'
 
 interface Props {
   items: Item[]
-  projectPath?: string
+  projectId?: string
 }
 
 const DOT: Record<'running' | 'ok' | 'error', string> = {
@@ -16,7 +16,7 @@ const DOT: Record<'running' | 'ok' | 'error', string> = {
 
 const SEPARATOR = 'flex justify-center gap-2 py-1 text-[11px] uppercase tracking-[0.08em] text-muted'
 
-export function MessageList({ items, projectPath }: Props): React.JSX.Element {
+export function MessageList({ items, projectId }: Props): React.JSX.Element {
   const bottom = useRef<HTMLDivElement>(null)
 
   const pendingKey = items.find((i) => i.kind === 'approval' && i.status === 'pending')?.key
@@ -39,14 +39,14 @@ export function MessageList({ items, projectPath }: Props): React.JSX.Element {
       )}
 
       {items.map((item) => (
-        <Row key={item.key} item={item} projectPath={projectPath} />
+        <Row key={item.key} item={item} projectId={projectId} />
       ))}
       <div ref={bottom} />
     </div>
   )
 }
 
-function Row({ item, projectPath }: { item: Item; projectPath?: string }): React.JSX.Element | null {
+function Row({ item, projectId }: { item: Item; projectId?: string }): React.JSX.Element | null {
   switch (item.kind) {
     case 'user':
       return (
@@ -66,7 +66,7 @@ function Row({ item, projectPath }: { item: Item; projectPath?: string }): React
       )
 
     case 'approval':
-      return <ApprovalCard item={item} projectPath={projectPath} />
+      return <ApprovalCard item={item} projectId={projectId} />
 
     // One line, skimmable with a thumb. Not expandable JSON.
     case 'tool': {
@@ -76,7 +76,7 @@ function Row({ item, projectPath }: { item: Item; projectPath?: string }): React
           <span className={`size-1.5 shrink-0 rounded-full ${DOT[item.status]}`} />
           <span className="shrink-0 text-fg">{item.name}</span>
           <span className="truncate text-left font-mono">
-            {target ? relativePath(target, projectPath) : (item.summary ?? '')}
+            {target ? relativePath(target, projectId) : (item.summary ?? '')}
           </span>
         </div>
       )

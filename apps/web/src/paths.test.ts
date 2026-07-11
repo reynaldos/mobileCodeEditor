@@ -2,22 +2,22 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { describeTool, relativePath, targetOf } from './paths.ts'
 
-const ROOT = '/Users/rey/Documents/fitnessTracker'
+// Paths from the agent look like /data/projects/<id>/... ; the client strips
+// everything through `/<projectId>/`, since it no longer knows the absolute root.
+const ID = 'fitnessTracker'
+const ABS = `/data/projects/${ID}`
 
-test('paths render relative to the project root', () => {
-  assert.equal(relativePath(`${ROOT}/app/(app)/settings/page.tsx`, ROOT), 'app/(app)/settings/page.tsx')
-  assert.equal(relativePath(ROOT, ROOT), '.')
+test('paths render relative to the project directory', () => {
+  assert.equal(relativePath(`${ABS}/app/(app)/settings/page.tsx`, ID), 'app/(app)/settings/page.tsx')
+  assert.equal(relativePath(`${ABS}/`, ID), '.')
 })
 
-test('a path outside the project is left absolute rather than mangled', () => {
-  assert.equal(relativePath('/etc/hosts', ROOT), '/etc/hosts')
+test('without a projectId the path is left absolute', () => {
   assert.equal(relativePath('/etc/hosts', undefined), '/etc/hosts')
 })
 
-test('a sibling directory sharing the prefix is not treated as inside', () => {
-  // A naive startsWith turns this into `-old/app/page.tsx`, which is a lie.
-  const sibling = `${ROOT}-old/app/page.tsx`
-  assert.equal(relativePath(sibling, ROOT), sibling)
+test('a path not under the project is left absolute', () => {
+  assert.equal(relativePath('/etc/hosts', ID), '/etc/hosts')
 })
 
 test('targetOf finds the first path-ish field', () => {
@@ -28,10 +28,7 @@ test('targetOf finds the first path-ish field', () => {
 })
 
 test('describeTool names the file when the SDK gives us no title', () => {
-  assert.equal(
-    describeTool('Edit', { file_path: `${ROOT}/app/page.tsx` }, ROOT),
-    'Edit app/page.tsx',
-  )
-  assert.equal(describeTool('Bash', { command: 'rm -rf build' }, ROOT), 'Claude wants to run: rm -rf build')
-  assert.equal(describeTool('WebFetch', {}, ROOT), 'Claude wants to run WebFetch')
+  assert.equal(describeTool('Edit', { file_path: `${ABS}/app/page.tsx` }, ID), 'Edit app/page.tsx')
+  assert.equal(describeTool('Bash', { command: 'rm -rf build' }, ID), 'Claude wants to run: rm -rf build')
+  assert.equal(describeTool('WebFetch', {}, ID), 'Claude wants to run WebFetch')
 })

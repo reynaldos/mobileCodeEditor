@@ -13,7 +13,13 @@ const CONFIRM_TIMEOUT_MS = 4_000
 /* 32px tall, under the 44px touch minimum on purpose: destructive, and two taps. */
 const CHIP = 'h-8 shrink-0 whitespace-nowrap rounded-lg border px-3 text-[13px] disabled:opacity-50'
 
-export function NewConversationButton({ busy }: { busy: boolean }): React.JSX.Element {
+export function NewConversationButton({
+  projectId,
+  busy,
+}: {
+  projectId: string | null
+  busy: boolean
+}): React.JSX.Element | null {
   const [confirming, setConfirming] = useState(false)
   const [sending, setSending] = useState(false)
 
@@ -24,10 +30,14 @@ export function NewConversationButton({ busy }: { busy: boolean }): React.JSX.El
     return () => clearTimeout(timer)
   }, [confirming])
 
+  // No project selected → nothing to reset.
+  if (!projectId) return null
+
   async function reset(): Promise<void> {
+    if (!projectId) return
     setSending(true)
     try {
-      await startNewConversation()
+      await startNewConversation(projectId)
       // The `conversation_reset` event arrives over SSE and clears the view.
     } finally {
       setSending(false)

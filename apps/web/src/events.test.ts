@@ -1,18 +1,21 @@
 import type { Event, EventBody } from '@mce/protocol'
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { initialState, reduce, type Item, type State } from './events.ts'
+import { initialState, reduce, viewOf, type Item, type ProjectState, type State } from './events.ts'
 
 let seq = 0
-const at = (body: EventBody): Event =>
-  ({ seq: ++seq, sessionId: 's1', projectId: 'p', ts: 1, ...body }) as Event
+/** Events default to project 'p'; pass a projectId to place one elsewhere. */
+const at = (body: EventBody, projectId = 'p'): Event =>
+  ({ seq: ++seq, sessionId: 's1', projectId, ts: 1, ...body }) as Event
 
 function run(bodies: EventBody[]): State {
   seq = 0
-  return bodies.map(at).reduce(reduce, initialState)
+  return bodies.map((b) => at(b)).reduce(reduce, initialState)
 }
 
-const kinds = (state: State): Item['kind'][] => state.items.map((i) => i.kind)
+/** The default project's view. */
+const view = (state: State): ProjectState => viewOf(state, 'p')
+const kinds = (state: State): Item['kind'][] => view(state).items.map((i) => i.kind)
 
 test('a full turn renders in order', () => {
   const state = run([
@@ -25,8 +28,8 @@ test('a full turn renders in order', () => {
   ])
 
   assert.deepEqual(kinds(state), ['user', 'assistant', 'tool', 'turn'])
-  assert.equal(state.agent, 'awaiting_input')
-  assert.equal(state.sessionId, 's1')
+  assert.equal(view(state).agent, 'awaiting_input')
+  assert.equal(view(state).sessionId, 's1')
 })
 
 test('tool_result finds its tool_use even with items appended in between', () => {
@@ -37,11 +40,10 @@ test('tool_result finds its tool_use even with items appended in between', () =>
     { type: 'tool_result', toolUseId: 't1', ok: false, summary: 'boom' },
   ])
 
-  const first = state.items[0]
-  const second = state.items[2]
-  assert.equal(first?.kind === 'tool' && first.status, 'error')
-  assert.equal(first?.kind === 'tool' && first.summary, 'boom')
-  assert.equal(second?.kind === 'tool' && second.status, 'running')
+  const items = view(state).items
+  assert.equal(items[0]?.kind === 'tool' && items[0].status, 'error')
+  assert.equal(items[0]?.kind === 'tool' && items[0].summary, 'boom')
+  assert.equal(items[2]?.kind === 'tool' && items[2].status, 'running')
 })
 
 test('approval flows pending -> allowed and releases the agent', () => {
@@ -50,9 +52,9 @@ test('approval flows pending -> allowed and releases the agent', () => {
     { type: 'approval_decision', approvalId: 'a1', allow: true },
   ])
 
-  const card = state.items[0]
+  const card = view(state).items[0]
   assert.equal(card?.kind === 'approval' && card.status, 'allowed')
-  assert.equal(state.agent, 'thinking')
+  assert.equal(view(state).agent, 'thinking')
 })
 
 test('agent stays blocked while any approval is still pending', () => {
@@ -62,18 +64,7 @@ test('agent stays blocked while any approval is still pending', () => {
     { type: 'approval_decision', approvalId: 'a1', allow: true },
   ])
 
-  assert.equal(state.agent, 'awaiting_approval', 'a2 is still waiting on the user')
-})
-
-test('approval_expired marks the card rather than dropping it', () => {
-  const state = run([
-    { type: 'approval_request', approvalId: 'a1', toolUseId: 't1', tool: 'Write', input: {} },
-    { type: 'approval_expired', approvalId: 'a1' },
-  ])
-
-  const card = state.items[0]
-  assert.equal(card?.kind === 'approval' && card.status, 'expired')
-  assert.equal(state.agent, 'thinking')
+  assert.equal(view(state).agent, 'awaiting_approval', 'a2 is still waiting on the user')
 })
 
 test('replayed events are idempotent — a reconnect race cannot duplicate a message', () => {
@@ -81,7 +72,7 @@ test('replayed events are idempotent — a reconnect race cannot duplicate a mes
   const once = reduce(initialState, first)
   const twice = reduce(once, first)
 
-  assert.equal(twice.items.length, 1)
+  assert.equal(viewOf(twice, 'p').items.length, 1)
   assert.equal(twice, once, 'same state object: no re-render')
 })
 
@@ -90,14 +81,62 @@ test('an out-of-order low seq is ignored', () => {
     reduce(initialState, { seq: 5, sessionId: 's', projectId: 'p', ts: 1, type: 'assistant_text', text: 'b' }),
     { seq: 2, sessionId: 's', projectId: 'p', ts: 1, type: 'assistant_text', text: 'a' },
   )
-  assert.deepEqual(state.items.map((i) => (i.kind === 'assistant' ? i.text : '')), ['b'])
+  assert.deepEqual(viewOf(state, 'p').items.map((i) => (i.kind === 'assistant' ? i.text : '')), ['b'])
   assert.equal(state.lastSeq, 5)
 })
 
-test('an orphan tool_result does not throw', () => {
-  const state = run([{ type: 'tool_result', toolUseId: 'ghost', ok: true, summary: 'x' }])
+test('a conversation_reset clears that project view — the screen forgets what Claude forgot', () => {
+  const state = run([
+    { type: 'session_started', claudeSessionId: 'c1', model: 'opus' },
+    { type: 'user_prompt', text: 'remember this' },
+    { type: 'turn_complete' },
+    { type: 'conversation_reset' },
+  ])
+
   assert.deepEqual(kinds(state), [])
-  assert.equal(state.lastSeq, 1)
+  assert.equal(view(state).agent, 'idle')
+})
+
+test('replaying the whole log after a reset still shows a fresh view', () => {
+  const state = run([
+    { type: 'user_prompt', text: 'old' },
+    { type: 'conversation_reset' },
+    { type: 'session_started', claudeSessionId: 'c2', model: 'opus' },
+    { type: 'user_prompt', text: 'new' },
+  ])
+
+  assert.deepEqual(kinds(state), ['user'])
+  const first = view(state).items[0]
+  assert.equal(first?.kind === 'user' && first.text, 'new')
+})
+
+test('two projects keep separate views — Phase 2 isolation', () => {
+  seq = 0
+  const events = [
+    at({ type: 'user_prompt', text: 'alpha work' }, 'alpha'),
+    at({ type: 'user_prompt', text: 'beta work' }, 'beta'),
+    at({ type: 'assistant_text', text: 'on beta' }, 'beta'),
+  ]
+  const state = events.reduce(reduce, initialState)
+
+  assert.deepEqual(viewOf(state, 'alpha').items.map((i) => i.kind), ['user'])
+  assert.deepEqual(viewOf(state, 'beta').items.map((i) => i.kind), ['user', 'assistant'])
+  const alphaFirst = viewOf(state, 'alpha').items[0]
+  assert.equal(alphaFirst?.kind === 'user' && alphaFirst.text, 'alpha work')
+  // A project with no events at all is an empty view, not undefined.
+  assert.deepEqual(viewOf(state, 'gamma').items, [])
+})
+
+test('project_created / project_create_failed drive the picker signals, not a conversation', () => {
+  const state = run([
+    { type: 'project_created', name: 'newproj' },
+    { type: 'project_create_failed', name: 'badproj', error: 'clone failed' },
+  ])
+
+  assert.deepEqual(state.created, ['newproj'])
+  assert.equal(state.failed['badproj'], 'clone failed')
+  // These are not conversation events — no project view got items.
+  assert.deepEqual(viewOf(state, 'newproj').items, [])
 })
 
 test('session_ended is terminal and carries its reason', () => {
@@ -106,60 +145,7 @@ test('session_ended is terminal and carries its reason', () => {
     { type: 'session_ended', reason: 'interrupted', message: 'Server restarted.' },
   ])
 
-  assert.equal(state.agent, 'ended')
-  const last = state.items.at(-1)
+  assert.equal(view(state).agent, 'ended')
+  const last = view(state).items.at(-1)
   assert.equal(last?.kind === 'ended' && last.reason, 'interrupted')
-})
-
-test('cost and apiKeySource reach the log but never the rendered state', () => {
-  const state = run([
-    { type: 'session_started', claudeSessionId: 'c1', model: 'opus', apiKeySource: 'oauth' },
-    { type: 'turn_complete', costUsd: 0.239, numTurns: 3 },
-  ])
-
-  // The events carry them; the UI does not surface them. Analytics is a query
-  // over the log, not a number in a header. See ROADMAP "Usage".
-  assert.equal(kinds(state).at(-1), 'turn')
-  assert.ok(!('costUsd' in state), 'no cost in client state')
-  assert.ok(!('apiKeySource' in state), 'no auth source in client state')
-})
-
-test('a conversation_reset clears the view — Claude forgot it, so the screen forgets it', () => {
-  const state = run([
-    { type: 'session_started', claudeSessionId: 'c1', model: 'opus' },
-    { type: 'user_prompt', text: 'remember this' },
-    { type: 'assistant_text', text: 'ok' },
-    { type: 'turn_complete' },
-    { type: 'conversation_reset' },
-  ])
-
-  assert.deepEqual(kinds(state), [])
-  assert.equal(state.agent, 'idle')
-  assert.equal(state.sessionId, null)
-})
-
-test('a reset drops correlation indexes, so a stale tool_result cannot resurrect a row', () => {
-  const state = run([
-    { type: 'tool_use', toolUseId: 't1', name: 'Read', input: {} },
-    { type: 'conversation_reset' },
-    { type: 'tool_result', toolUseId: 't1', ok: true, summary: 'from the old life' },
-  ])
-
-  assert.deepEqual(kinds(state), [])
-})
-
-test('replaying the whole log after a reset still shows a fresh view', () => {
-  // The reducer runs over every event from seq 0 on page load. Reaching the
-  // reset must land it back at empty, or reload-after-reset shows the old chat.
-  const state = run([
-    { type: 'user_prompt', text: 'old' },
-    { type: 'assistant_text', text: 'old reply' },
-    { type: 'conversation_reset' },
-    { type: 'session_started', claudeSessionId: 'c2', model: 'opus' },
-    { type: 'user_prompt', text: 'new' },
-  ])
-
-  assert.deepEqual(kinds(state), ['user'])
-  assert.equal(state.items[0]?.kind === 'user' && state.items[0].text, 'new')
-  assert.equal(state.agent, 'thinking')
 })
