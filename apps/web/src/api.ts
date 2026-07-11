@@ -145,15 +145,19 @@ export async function checkProjectName(name: string): Promise<NameCheckResponse 
   return (await response.json()) as NameCheckResponse
 }
 
-/** Resolves the promise `canUseTool` is parked on. 409 if already decided or expired. */
+/**
+ * Resolves the promise `canUseTool` is parked on. 409 if already decided or
+ * expired. `always` persists an allow-rule so this tool/command stops prompting.
+ */
 export async function decideApproval(
   approvalId: string,
   allow: boolean,
-  reason?: string,
+  opts: { reason?: string; always?: boolean } = {},
 ): Promise<void> {
   await post<void>(`/api/approvals/${encodeURIComponent(approvalId)}`, {
     allow,
-    ...(reason ? { reason } : {}),
+    ...(opts.reason ? { reason: opts.reason } : {}),
+    ...(opts.always ? { always: true } : {}),
   } satisfies ApprovalRequest)
 }
 

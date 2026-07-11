@@ -54,6 +54,12 @@ export type EventBody =
   | { type: 'approval_decision'; approvalId: string; allow: boolean; reason?: string }
   /** Appended on boot for any request whose deferred promise died with the process. */
   | { type: 'approval_expired'; approvalId: string }
+  /**
+   * A standing allow-rule the user created via "Always approve" (Phase 2.7).
+   * Projected per project into the auto-approve set: `tool` alone allows that
+   * tool; `match` (a Bash command prefix) narrows it to matching commands.
+   */
+  | { type: 'rule_allowed'; tool: string; match?: string }
   /** One assistant turn finished. The agent is alive and awaiting input. */
   | { type: 'turn_complete'; costUsd?: number; numTurns?: number }
   /**
@@ -145,6 +151,8 @@ export interface PromptResponse {
 export interface ApprovalRequest {
   allow: boolean
   reason?: string
+  /** "Always approve": persist an allow-rule so this tool/command stops prompting. */
+  always?: boolean
 }
 
 /** POST /api/conversations/new — reset one project's conversation. */

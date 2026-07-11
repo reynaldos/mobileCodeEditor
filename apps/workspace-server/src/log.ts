@@ -301,6 +301,24 @@ export class EventLog {
     return rows.map((r) => r.id)
   }
 
+  /**
+   * Standing allow-rules for a project, from `rule_allowed` events (Phase 2.7).
+   * The auto-approve set the session consults before parking a permission prompt.
+   */
+  allowRulesOf(projectId: string): Array<{ tool: string; match?: string }> {
+    const rows = this.#db
+      .prepare(
+        `SELECT DISTINCT json_extract(payload, '$.tool')  AS tool,
+                         json_extract(payload, '$.match') AS match
+           FROM events
+          WHERE type = 'rule_allowed' AND project_id = ?`,
+      )
+      .all(projectId) as Array<{ tool: string | null; match: string | null }>
+    return rows
+      .filter((r): r is { tool: string; match: string | null } => typeof r.tool === 'string')
+      .map((r) => ({ tool: r.tool, ...(r.match ? { match: r.match } : {}) }))
+  }
+
   /** Project-creation events, for the picker's "created how / when". */
   projectCreations(): Array<{ name: string; repoUrl?: string; ts: number }> {
     return this.#db

@@ -161,13 +161,22 @@ export class AgentSession {
     })
   }
 
-  /** @returns false if this approval was already decided, expired, or never existed. */
-  resolveApproval(approvalId: string, allow: boolean, reason?: string): boolean {
+  /** True if a standing "Always approve" rule already covers this call. */
+  #allowedByRule(toolName: string, input: Record<string, unknown>): boolean {
+    return this.#log.allowRulesOf(this.projectId).some((rule) => matchesRule(rule, toolName, input))
+  }
+
+  /**
+   * @param always persist an allow-rule so this tool/command stops prompting.
+   * @returns false if this approval was already decided, expired, or never existed.
+   */
+  resolveApproval(approvalId: string, allow: boolean, reason?: string, always = false): boolean {
     const pending = this.#pending.get(approvalId)
     if (!pending) return false
     this.#pending.delete(approvalId)
 
     this.#append({ type: 'approval_decision', approvalId, allow, ...(reason ? { reason } : {}) })
+    if (allow && always) this.#append({ type: 'rule_allowed', ...ruleFor(pending.tool, pending.input) })
     if (this.#pending.size === 0) this.#status = 'thinking'
 
     pending.resolve(
@@ -235,7 +244,9 @@ export class AgentSession {
    * blocked indefinitely, with no error and no timeout.
    */
   readonly #canUseTool: CanUseTool = async (toolName, input, options) => {
-    if (AUTO_APPROVED.has(toolName)) {
+    // Built-in read-only allowlist, plus the user's own standing rules from
+    // "Always approve" (projected from the log, per project).
+    if (AUTO_APPROVED.has(toolName) || this.#allowedByRule(toolName, input)) {
       return { behavior: 'allow', updatedInput: input, toolUseID: options.toolUseID }
     }
 
@@ -388,6 +399,45 @@ export class AgentSession {
       ...body,
     } as NewEvent)
   }
+}
+
+/**
+ * Programs whose first argument is a subcommand — allow-rules key on the first
+ * TWO tokens (`git status`) so "Always approve" doesn't also wave through
+ * `git push`. Everything else keys on the program alone.
+ */
+const SUBCOMMANDED = new Set([
+  'git', 'gh', 'npm', 'pnpm', 'yarn', 'bun', 'npx', 'docker', 'cargo', 'go', 'kubectl', 'fly', 'pip', 'make', 'brew',
+])
+
+function commandOf(input: Record<string, unknown>): string | undefined {
+  return typeof input.command === 'string' ? input.command : undefined
+}
+
+/** The allow-rule key for a Bash command: `program` or `program subcommand`. */
+function commandPrefix(command: string): string {
+  const tokens = command.trim().split(/\s+/)
+  const first = tokens[0] ?? ''
+  if (SUBCOMMANDED.has(first) && tokens[1] && !tokens[1].startsWith('-')) return `${first} ${tokens[1]}`
+  return first
+}
+
+/** Derive the rule to persist from a granted call. */
+function ruleFor(tool: string, input: Record<string, unknown>): { tool: string; match?: string } {
+  if (tool === 'Bash') {
+    const command = commandOf(input)
+    const match = command ? commandPrefix(command) : undefined
+    return match ? { tool, match } : { tool }
+  }
+  return { tool }
+}
+
+/** Does a stored rule cover this call? A rule without `match` allows the whole tool. */
+function matchesRule(rule: { tool: string; match?: string }, tool: string, input: Record<string, unknown>): boolean {
+  if (rule.tool !== tool) return false
+  if (!rule.match) return true
+  const command = commandOf(input)
+  return command !== undefined && commandPrefix(command) === rule.match
 }
 
 /** One line. The log is for skimming with a thumb, not for storing file reads. */
