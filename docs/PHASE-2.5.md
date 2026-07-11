@@ -70,7 +70,10 @@ being backfilled. New threads carry real ids going forward.
 
 ---
 
-## Blocks
+## Blocks — all ✅ (built + verified locally; on-device test pending)
+
+Committed per block: 1 · (2+3) · (4+5) · 6. Blocks 2+3 and 4+5 each merged because
+they can't compile apart (the prompt signature; the reducer and its consumers).
 
 ### Block 1 — Data model: `thread_id` + protocol
 - Migration #3 (column + index).
@@ -102,9 +105,16 @@ being backfilled. New threads carry real ids going forward.
 - The header shows project › thread.
 
 ### Block 6 — Verify + docs
-- Unit tests: thread listing/grouping (incl. the NULL legacy thread), per-thread session
-  isolation with the fake `query`, recap building, reducer thread-routing. Live curl.
-  Then the on-device test.
+- 104 tests: thread listing/grouping (incl. the NULL legacy thread), the native-resume vs
+  recap decision with an injected `sessionExists`, recap building, reducer thread-routing.
+- Live curl: migration at version 3, new/list threads newest-first, legacy bucket flagged and
+  read-only (400), routing (400 no-thread / 404 no-project / 503 no-token).
+- **Resolved a design question from Block 2:** we don't rely on detecting a runtime resume
+  failure. The native-vs-recap choice is made *up front* by checking whether Claude's
+  transcript is on disk (`claude-sessions.ts`). If that path is wrong in production we simply
+  always recap — safe, lower fidelity, never broken. That path is the one thing to confirm
+  on the box.
+- Remaining: the on-device acceptance test (below).
 
 ---
 
