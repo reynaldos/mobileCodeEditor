@@ -18,8 +18,9 @@ primary_region = "iad"   # Ashburn, US East. Pick the region nearest you.
 
 [env]
   # Non-secret config. Secrets go through `fly secrets set` — never in this file.
-  GIT_AUTHOR_NAME = "rey sanchez"
-  GIT_AUTHOR_EMAIL = "rey.sanchez.dev@gmail.com"
+  # Git identity is derived from the GH_TOKEN account by the entrypoint (login +
+  # GitHub noreply email), so commits attribute to the real user. Set
+  # GIT_AUTHOR_NAME / GIT_AUTHOR_EMAIL here only to override that.
   # An empty projects dir self-populates from this on first boot.
   PROJECT_REPO = "https://github.com/reynaldos/fitnessTracker.git"
   # Fly Machines allow ONE volume, so everything lives under /data — the log, the

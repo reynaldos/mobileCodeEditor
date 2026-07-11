@@ -31,16 +31,31 @@ export PROJECT_PATH="${PROJECT_PATH:-/projects/app}"
 # and push. Without this, every git operation on a project fails.
 git config --global --add safe.directory '*'
 
-# Who Claude's commits are attributed to. Config, not a secret — a name and email
-# are public in every commit. Driven by env so it is one value to change, and so
-# a future per-tenant control plane injects each user's identity (from their
-# GitHub profile) exactly the way it injects everything else. See DECISIONS #13.
-if [ -n "${GIT_AUTHOR_NAME:-}" ]; then
-  git config --global user.name "$GIT_AUTHOR_NAME"
+# Who Claude's commits are attributed to. GitHub attributes commits by EMAIL, so
+# to show up as the real account (not a `node@hostname` the container invented) we
+# derive the identity from `gh` — the account's login and its noreply address —
+# unless GIT_AUTHOR_NAME/EMAIL explicitly override it. Config, not a secret: every
+# commit makes it public. A future per-tenant control plane injects each user's
+# identity the same way. See DECISIONS #13.
+git_name="${GIT_AUTHOR_NAME:-}"
+git_email="${GIT_AUTHOR_EMAIL:-}"
+
+if [ -z "$git_name" ] || [ -z "$git_email" ]; then
+  if [ -n "${GH_TOKEN:-}" ]; then
+    # One call, tab-separated: name (falls back to login), login, numeric id.
+    ident=$(gh api /user --jq '[.name // .login, .login, (.id|tostring)] | @tsv' 2>/dev/null || true)
+    if [ -n "$ident" ]; then
+      [ -z "$git_name" ] && git_name=$(printf '%s' "$ident" | cut -f1)
+      gh_login=$(printf '%s' "$ident" | cut -f2)
+      gh_id=$(printf '%s' "$ident" | cut -f3)
+      [ -z "$git_email" ] && git_email="${gh_id}+${gh_login}@users.noreply.github.com"
+    fi
+  fi
 fi
-if [ -n "${GIT_AUTHOR_EMAIL:-}" ]; then
-  git config --global user.email "$GIT_AUTHOR_EMAIL"
-fi
+
+if [ -n "$git_name" ]; then git config --global user.name "$git_name"; fi
+if [ -n "$git_email" ]; then git config --global user.email "$git_email"; fi
+echo "git identity: $(git config --global user.name 2>/dev/null || echo '?') <$(git config --global user.email 2>/dev/null || echo '?')>" >&2
 
 # With GH_TOKEN present, `gh` is already authenticated; this teaches plain `git`
 # to use it too, so `git push` works without a credential prompt.
