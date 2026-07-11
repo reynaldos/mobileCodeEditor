@@ -52,8 +52,17 @@ a button.
 ### Blocks 4 + 5 — Client + picker  ✅ (inseparable on the client, one commit)
 - `api.ts` project methods; `sendPrompt`/`startNewConversation` take `projectId`.
 - Reducer is `byProject`; active project is React state persisted in `localStorage`.
-- Overlay picker (not a router), a "+ New" form (clone URL or fresh name) with a spinner
-  driven by the event, and a header that shows/switches the active project.
+- Overlay picker (not a router) and a header that shows/switches the active project.
+
+### Enhanced picker — GitHub-backed Clone / Create  ✅
+A follow-on: the add-project area became two tabs.
+- **Clone** — type to search your repos (owned first, private badged), debounced against
+  `GET /api/github/repos`, or paste any git URL. `Github` wraps the `gh` CLI with an
+  injectable runner so it's unit-tested without touching a real account.
+- **Create** — name a new repo with availability checked as you type
+  (`GET /api/github/check-name`, local + remote), a private/public toggle, and
+  `gh repo create` + clone so the new project has a remote and push works immediately.
+- Both degrade to plain URL paste / local `git init` when `GH_TOKEN` is absent.
 
 ### Block 6 — Verify  ✅
 - 90 tests (67 server, 23 web): projects registry (sanitize, traversal guard, failed-clone
