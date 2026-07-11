@@ -1,3 +1,4 @@
+import { BuildTracker } from './build-tracker.ts'
 import { loadConfig, secretsOf } from './config.ts'
 import { openDb } from './db.ts'
 import { acquireLock } from './lock.ts'
@@ -23,19 +24,22 @@ const log = new EventLog(db, makeRedactor(secretsOf(config)))
 // gh authenticates from GH_TOKEN in the container. Absent → GitHub features off,
 // and the picker degrades to plain URL paste + local create.
 const github = process.env.GH_TOKEN ? new Github() : undefined
-const projects = new ProjectStore(config.projectsRoot, log, github)
+const builds = new BuildTracker()
+const projects = new ProjectStore(config.projectsRoot, log, github, builds)
 const sessions = new SessionManager(log, config, projects)
 const pushStore = new PushStore(db)
 const pusher = new Pusher(pushStore, config.vapid)
 
-// Live promises and generators died with the last process; the log did not.
+// Live promises, generators, and builds died with the last process; the log did
+// not. Recover interrupted sessions and builds into terminal events.
 sessions.recoverOnBoot()
+projects.recoverOnBoot()
 
 // Turns log events into push notifications, on the same fan-out as SSE.
 const notifier = new Notifier(log, pusher)
 notifier.start()
 
-const app = await buildServer(config, { log, sessions, projects, github, pushStore, pusher })
+const app = await buildServer(config, { log, sessions, projects, builds, github, pushStore, pusher })
 
 await app.listen({ port: config.port, host: config.host })
 app.log.info(

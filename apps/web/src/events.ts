@@ -67,6 +67,8 @@ export interface State {
    */
   created: string[]
   failed: Record<string, string>
+  /** Project ids whose setup is in progress — drives the blocking build modal. */
+  building: string[]
 }
 
 export const initialState: State = {
@@ -74,6 +76,7 @@ export const initialState: State = {
   byThread: {},
   created: [],
   failed: {},
+  building: [],
 }
 
 /** The view for a thread, or an empty one if it has no events yet. */
@@ -88,12 +91,20 @@ export function reduce(state: State, event: Event): State {
   if (event.seq <= state.lastSeq) return state
   const base = { ...state, lastSeq: event.seq }
 
-  // Project lifecycle events aren't conversation — they drive the picker.
+  // Project lifecycle events aren't conversation — they drive the picker and the
+  // build modal. `building` is the set with a `started` but no terminal event.
+  if (event.type === 'project_create_started') {
+    return { ...base, building: without(state.building, event.name).concat(event.name) }
+  }
   if (event.type === 'project_created') {
-    return { ...base, created: [...state.created, event.name] }
+    return { ...base, building: without(state.building, event.name), created: [...state.created, event.name] }
   }
   if (event.type === 'project_create_failed') {
-    return { ...base, failed: { ...state.failed, [event.name]: event.error } }
+    return {
+      ...base,
+      building: without(state.building, event.name),
+      failed: { ...state.failed, [event.name]: event.error },
+    }
   }
 
   // Every other event belongs to a thread. Legacy events (no threadId) collect
@@ -103,6 +114,11 @@ export function reduce(state: State, event: Event): State {
   const next = reduceProject(view, event)
   if (next === view) return base
   return { ...base, byThread: { ...state.byThread, [threadId]: next } }
+}
+
+/** A copy of the list with `name` removed. */
+function without(list: string[], name: string): string[] {
+  return list.filter((n) => n !== name)
 }
 
 /** Replaces one item without mutating the array. */

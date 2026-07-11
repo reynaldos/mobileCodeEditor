@@ -2,6 +2,7 @@ import cors from '@fastify/cors'
 import fastifyStatic from '@fastify/static'
 import Fastify, { type FastifyInstance } from 'fastify'
 import { existsSync } from 'node:fs'
+import type { BuildTracker } from './build-tracker.ts'
 import type { Config } from './config.ts'
 import type { Github } from './github.ts'
 import type { EventLog } from './log.ts'
@@ -9,6 +10,7 @@ import type { ProjectStore } from './projects.ts'
 import type { Pusher } from './push.ts'
 import type { PushStore } from './push-store.ts'
 import { registerApprovals } from './routes/approvals.ts'
+import { registerBuild } from './routes/build.ts'
 import { registerDebug } from './routes/debug.ts'
 import { registerEvents } from './routes/events.ts'
 import { registerGithub } from './routes/github.ts'
@@ -22,13 +24,14 @@ export interface Services {
   log: EventLog
   sessions: SessionManager
   projects: ProjectStore
+  builds: BuildTracker
   github: Github | undefined
   pushStore: PushStore
   pusher: Pusher
 }
 
 export async function buildServer(config: Config, services: Services): Promise<FastifyInstance> {
-  const { log, sessions, projects, github, pushStore, pusher } = services
+  const { log, sessions, projects, builds, github, pushStore, pusher } = services
   const app = Fastify({
     logger: config.isDev
       ? { transport: { target: 'pino-pretty', options: { translateTime: 'HH:MM:ss' } } }
@@ -52,6 +55,7 @@ export async function buildServer(config: Config, services: Services): Promise<F
 
   registerEvents(app, log, config)
   registerProjects(app, projects)
+  registerBuild(app, builds, projects, config)
   registerThreads(app, log, projects, sessions)
   registerGithub(app, projects, github)
   registerPrompt(app, sessions)
