@@ -39,11 +39,11 @@ export function ApprovalCard({ item, projectId }: Props): React.JSX.Element {
   const subject = diffSubjectOf(item.tool, item.input)
   const command = commandOf(item.input)
 
-  async function decide(allow: boolean): Promise<void> {
+  async function decide(allow: boolean, always = false): Promise<void> {
     setSending(true)
     setError(undefined)
     try {
-      await decideApproval(item.approvalId, allow)
+      await decideApproval(item.approvalId, allow, { always })
       // The status change arrives over SSE, not from this response.
     } catch (err) {
       setError(
@@ -92,21 +92,32 @@ export function ApprovalCard({ item, projectId }: Props): React.JSX.Element {
       {error && <p className="mx-3 mt-1 text-[13px] text-del">{error}</p>}
 
       {item.status === 'pending' && (
-        <div className="flex gap-2 p-3">
-          {/* 44px is the smallest thing a thumb reliably hits. */}
+        <div className="flex flex-col gap-2 p-3">
+          <div className="flex gap-2">
+            {/* 44px is the smallest thing a thumb reliably hits. */}
+            <button
+              className="min-h-11 flex-1 rounded-[10px] border border-[#4a2326] bg-transparent font-semibold text-del disabled:opacity-50"
+              disabled={sending}
+              onClick={() => void decide(false)}
+            >
+              Reject
+            </button>
+            <button
+              className="min-h-11 flex-1 rounded-[10px] border border-add bg-add font-semibold text-[#04140a] disabled:opacity-50"
+              disabled={sending}
+              onClick={() => void decide(true)}
+            >
+              Approve
+            </button>
+          </div>
+          {/* Approve AND stop asking for this — the derived rule is named so it's
+              never a surprise (all git vs. just `git status`). */}
           <button
-            className="min-h-11 flex-1 rounded-[10px] border border-[#4a2326] bg-transparent font-semibold text-del disabled:opacity-50"
+            className="min-h-10 rounded-[10px] border border-line bg-panel-2 text-[13px] font-medium text-muted disabled:opacity-50"
             disabled={sending}
-            onClick={() => void decide(false)}
+            onClick={() => void decide(true, true)}
           >
-            Reject
-          </button>
-          <button
-            className="min-h-11 flex-1 rounded-[10px] border border-add bg-add font-semibold text-[#04140a] disabled:opacity-50"
-            disabled={sending}
-            onClick={() => void decide(true)}
-          >
-            Approve
+            {alwaysLabel(item.tool, item.input)}
           </button>
         </div>
       )}
@@ -118,4 +129,23 @@ function commandOf(input: unknown): string | undefined {
   if (!input || typeof input !== 'object') return undefined
   const command = (input as Record<string, unknown>).command
   return typeof command === 'string' ? command : undefined
+}
+
+// Mirrors ruleFor() in session.ts so the button names exactly what it will allow.
+const SUBCOMMANDED = new Set([
+  'git', 'gh', 'npm', 'pnpm', 'yarn', 'bun', 'npx', 'docker', 'cargo', 'go', 'kubectl', 'fly', 'pip', 'make', 'brew',
+])
+
+function alwaysLabel(tool: string, input: unknown): string {
+  if (tool === 'Bash') {
+    const command = commandOf(input)
+    if (command) {
+      const tokens = command.trim().split(/\s+/)
+      const first = tokens[0] ?? ''
+      const key =
+        SUBCOMMANDED.has(first) && tokens[1] && !tokens[1].startsWith('-') ? `${first} ${tokens[1]}` : first
+      return `Always allow "${key}"`
+    }
+  }
+  return `Always allow ${tool}`
 }

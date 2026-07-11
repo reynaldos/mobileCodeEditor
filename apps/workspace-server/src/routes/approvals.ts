@@ -15,7 +15,7 @@ export function registerApprovals(app: FastifyInstance, sessions: SessionManager
       return reply.code(400).send({ error: 'allow must be a boolean' })
     }
 
-    const outcome = sessions.resolveApproval(approvalId, body.allow, body.reason)
+    const outcome = sessions.resolveApproval(approvalId, body.allow, body.reason, body.always === true)
     if (outcome === 'not_pending') {
       // Already decided, expired on a restart, or never existed. Idempotent by
       // way of being loudly wrong rather than silently accepted.

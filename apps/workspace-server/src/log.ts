@@ -129,6 +129,23 @@ export class EventLog {
       .all() as Array<{ approvalId: string; sessionId: string; projectId: string }>
   }
 
+  /** Questions parked when the process died — cancelled on boot, like approvals. */
+  pendingQuestions(): Array<{ requestId: string; sessionId: string; projectId: string }> {
+    return this.#db
+      .prepare(
+        `SELECT json_extract(payload, '$.requestId') AS requestId,
+                session_id AS sessionId,
+                project_id AS projectId
+           FROM events
+          WHERE type = 'question_request'
+            AND json_extract(payload, '$.requestId') NOT IN (
+                  SELECT json_extract(payload, '$.requestId')
+                    FROM events
+                   WHERE type IN ('question_answered', 'question_cancelled'))`,
+      )
+      .all() as Array<{ requestId: string; sessionId: string; projectId: string }>
+  }
+
   /** Sessions that started and never ended: the process died mid-generator. */
   openSessions(): Array<{ sessionId: string; projectId: string }> {
     return this.#db
@@ -299,6 +316,24 @@ export class EventLog {
       )
       .all() as Array<{ id: string }>
     return rows.map((r) => r.id)
+  }
+
+  /**
+   * Standing allow-rules for a project, from `rule_allowed` events (Phase 2.7).
+   * The auto-approve set the session consults before parking a permission prompt.
+   */
+  allowRulesOf(projectId: string): Array<{ tool: string; match?: string }> {
+    const rows = this.#db
+      .prepare(
+        `SELECT DISTINCT json_extract(payload, '$.tool')  AS tool,
+                         json_extract(payload, '$.match') AS match
+           FROM events
+          WHERE type = 'rule_allowed' AND project_id = ?`,
+      )
+      .all(projectId) as Array<{ tool: string | null; match: string | null }>
+    return rows
+      .filter((r): r is { tool: string; match: string | null } => typeof r.tool === 'string')
+      .map((r) => ({ tool: r.tool, ...(r.match ? { match: r.match } : {}) }))
   }
 
   /** Project-creation events, for the picker's "created how / when". */

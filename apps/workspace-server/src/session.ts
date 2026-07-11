@@ -1,16 +1,19 @@
 import { query } from '@anthropic-ai/claude-agent-sdk'
 import type {
   CanUseTool,
+  OnUserDialog,
   PermissionResult,
   Query,
   SDKMessage,
   SDKUserMessage,
+  UserDialogResult,
 } from '@anthropic-ai/claude-agent-sdk'
-import type { EventBody, NewEvent, SessionStatus } from '@mce/protocol'
+import type { EventBody, NewEvent, Question, SessionStatus } from '@mce/protocol'
 import { randomUUID } from 'node:crypto'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { AsyncQueue } from './async-queue.ts'
 import { assertAgentCredentials, type Config } from './config.ts'
+import { changedFiles, headSha } from './git-changes.ts'
 import type { EventLog } from './log.ts'
 
 /**
@@ -26,6 +29,15 @@ import type { EventLog } from './log.ts'
  * want: a card for every `ls` would bury the cards that matter.
  */
 const AUTO_APPROVED = new Set(['Read', 'Grep', 'Glob'])
+
+/**
+ * `request_user_dialog` kinds we render as multiple-choice questions. The CLI
+ * fails closed — it only emits a kind we've declared — and the exact string for
+ * AskUserQuestion isn't pinned in the SDK types, so we declare the plausible
+ * candidates and handle any whose payload actually carries `questions`. The
+ * handler logs every kind it sees, so the real one is confirmed on first use.
+ */
+const QUESTION_DIALOG_KINDS = ['ask_user_question', 'askUserQuestion', 'user_question', 'question', 'side_question']
 
 const SUMMARY_MAX = 200
 
@@ -78,6 +90,7 @@ export class AgentSession {
 
   readonly #queue = new AsyncQueue<SDKUserMessage>()
   readonly #pending = new Map<string, Pending>()
+  readonly #pendingQuestions = new Map<string, (result: UserDialogResult) => void>()
   readonly #abort = new AbortController()
 
   #query: Query | undefined
@@ -86,6 +99,8 @@ export class AgentSession {
   #lastCostUsd: number | undefined
   #done: Promise<void> | undefined
   #interruptMessage: string | undefined
+  /** HEAD when the current turn's prompt was sent — the base for its file diff. */
+  #turnBase: Promise<string | undefined> | undefined
 
   constructor(opts: AgentSessionOptions) {
     this.id = opts.id
@@ -118,6 +133,10 @@ export class AgentSession {
       options: {
         cwd: this.#projectPath,
         canUseTool: this.#canUseTool,
+        // Multiple-choice questions (AskUserQuestion) arrive here, not via
+        // canUseTool. We only receive the kinds we declare (fails closed).
+        onUserDialog: this.#onUserDialog,
+        supportedDialogKinds: QUESTION_DIALOG_KINDS,
         // 'default' is what makes canUseTool get consulted at all.
         permissionMode: 'default',
         // Load no user/project settings. A container should behave identically
@@ -146,6 +165,10 @@ export class AgentSession {
     const toClaude = this.#recap ? `${this.#recap}\n\n---\n\n${text}` : text
     this.#recap = undefined
 
+    // Snapshot HEAD now so `turn_changes` at the end can diff exactly what this
+    // turn touched, whether Claude commits or leaves it in the working tree.
+    this.#turnBase = headSha(this.#projectPath)
+
     this.#status = 'thinking'
     this.#queue.push({
       type: 'user',
@@ -154,13 +177,22 @@ export class AgentSession {
     })
   }
 
-  /** @returns false if this approval was already decided, expired, or never existed. */
-  resolveApproval(approvalId: string, allow: boolean, reason?: string): boolean {
+  /** True if a standing "Always approve" rule already covers this call. */
+  #allowedByRule(toolName: string, input: Record<string, unknown>): boolean {
+    return this.#log.allowRulesOf(this.projectId).some((rule) => matchesRule(rule, toolName, input))
+  }
+
+  /**
+   * @param always persist an allow-rule so this tool/command stops prompting.
+   * @returns false if this approval was already decided, expired, or never existed.
+   */
+  resolveApproval(approvalId: string, allow: boolean, reason?: string, always = false): boolean {
     const pending = this.#pending.get(approvalId)
     if (!pending) return false
     this.#pending.delete(approvalId)
 
     this.#append({ type: 'approval_decision', approvalId, allow, ...(reason ? { reason } : {}) })
+    if (allow && always) this.#append({ type: 'rule_allowed', ...ruleFor(pending.tool, pending.input) })
     if (this.#pending.size === 0) this.#status = 'thinking'
 
     pending.resolve(
@@ -192,6 +224,12 @@ export class AgentSession {
       this.#pending.delete(approvalId)
       this.#append({ type: 'approval_decision', approvalId, allow: false, reason: 'Server shutting down.' })
       pending.resolve({ behavior: 'deny', message: 'Server shutting down.', interrupt: true })
+    }
+    // Same for parked questions — an unresolved dialog hangs the agent too.
+    for (const [requestId, resolve] of this.#pendingQuestions) {
+      this.#pendingQuestions.delete(requestId)
+      this.#append({ type: 'question_cancelled', requestId })
+      resolve({ behavior: 'cancelled' })
     }
 
     if (!this.#query || !this.#done) return
@@ -228,7 +266,9 @@ export class AgentSession {
    * blocked indefinitely, with no error and no timeout.
    */
   readonly #canUseTool: CanUseTool = async (toolName, input, options) => {
-    if (AUTO_APPROVED.has(toolName)) {
+    // Built-in read-only allowlist, plus the user's own standing rules from
+    // "Always approve" (projected from the log, per project).
+    if (AUTO_APPROVED.has(toolName) || this.#allowedByRule(toolName, input)) {
       return { behavior: 'allow', updatedInput: input, toolUseID: options.toolUseID }
     }
 
@@ -262,6 +302,60 @@ export class AgentSession {
         { once: true },
       )
     })
+  }
+
+  /**
+   * The question bridge, parallel to the approval bridge but on the SDK's
+   * `onUserDialog` channel. AskUserQuestion arrives as a `request_user_dialog`;
+   * we surface it as a `question_request` event and park until an HTTP answer
+   * arrives. Anything that isn't a recognizable question is declined so the CLI
+   * applies its default.
+   */
+  readonly #onUserDialog: OnUserDialog = async (request, options) => {
+    const questions = extractQuestions(request.payload)
+    // Printed (not logged as an event) so the exact dialogKind for AskUserQuestion
+    // is confirmable on first use — the SDK types leave it an open string union.
+    console.error(`[dialog] kind=${request.dialogKind} handled=${questions ? 'yes' : 'no'}`)
+
+    if (!questions) return { behavior: 'cancelled' }
+
+    const requestId = randomUUID()
+    this.#append({
+      type: 'question_request',
+      requestId,
+      ...(request.toolUseID ? { toolUseId: request.toolUseID } : {}),
+      questions,
+    })
+    this.#status = 'awaiting_approval'
+
+    return new Promise<UserDialogResult>((resolve) => {
+      this.#pendingQuestions.set(requestId, resolve)
+      options.signal.addEventListener(
+        'abort',
+        () => {
+          if (!this.#pendingQuestions.delete(requestId)) return
+          this.#append({ type: 'question_cancelled', requestId })
+          resolve({ behavior: 'cancelled' })
+        },
+        { once: true },
+      )
+    })
+  }
+
+  /** @returns false if this question was already answered, cancelled, or never existed. */
+  answerQuestion(requestId: string, answers: Record<string, string>): boolean {
+    const resolve = this.#pendingQuestions.get(requestId)
+    if (!resolve) return false
+    this.#pendingQuestions.delete(requestId)
+
+    this.#append({ type: 'question_answered', requestId, answers })
+    if (this.#pendingQuestions.size === 0 && this.#pending.size === 0) this.#status = 'thinking'
+    resolve({ behavior: 'completed', result: { answers } })
+    return true
+  }
+
+  hasPendingQuestion(requestId: string): boolean {
+    return this.#pendingQuestions.has(requestId)
   }
 
   async #consume(): Promise<void> {
@@ -336,6 +430,7 @@ export class AgentSession {
           costUsd: message.total_cost_usd,
           numTurns: message.num_turns,
         })
+        void this.#emitTurnChanges(this.#turnBase)
         return
       }
 
@@ -343,6 +438,19 @@ export class AgentSession {
         // The SDKMessage union has ~38 variants. We render five.
         return
     }
+  }
+
+  /**
+   * After a turn, diff the working tree against the HEAD snapshot from when the
+   * prompt was sent and append a `turn_changes` (names + counts only). Off the hot
+   * path and best-effort — a git hiccup must never fail a turn.
+   */
+  async #emitTurnChanges(basePromise?: Promise<string | undefined>): Promise<void> {
+    const base = await basePromise?.catch(() => undefined)
+    if (!base) return
+    const files = await changedFiles(this.#projectPath, base).catch(() => [])
+    if (files.length === 0) return
+    this.#append({ type: 'turn_changes', base, files })
   }
 
   #end(reason: 'complete' | 'error' | 'interrupted', message?: string): void {
@@ -367,6 +475,75 @@ export class AgentSession {
       ...body,
     } as NewEvent)
   }
+}
+
+/**
+ * Programs whose first argument is a subcommand — allow-rules key on the first
+ * TWO tokens (`git status`) so "Always approve" doesn't also wave through
+ * `git push`. Everything else keys on the program alone.
+ */
+const SUBCOMMANDED = new Set([
+  'git', 'gh', 'npm', 'pnpm', 'yarn', 'bun', 'npx', 'docker', 'cargo', 'go', 'kubectl', 'fly', 'pip', 'make', 'brew',
+])
+
+function commandOf(input: Record<string, unknown>): string | undefined {
+  return typeof input.command === 'string' ? input.command : undefined
+}
+
+/**
+ * Pull the questions array out of a `request_user_dialog` payload, if it looks
+ * like an AskUserQuestion. Defensive: the per-kind payload shape is opaque in the
+ * SDK types, so we validate structurally rather than trust the dialogKind.
+ */
+function extractQuestions(payload: Record<string, unknown>): Question[] | undefined {
+  const raw = payload.questions
+  if (!Array.isArray(raw) || raw.length === 0) return undefined
+  const questions: Question[] = []
+  for (const q of raw) {
+    if (!q || typeof q !== 'object') return undefined
+    const { question, header, options, multiSelect } = q as Record<string, unknown>
+    if (typeof question !== 'string' || !Array.isArray(options)) return undefined
+    questions.push({
+      question,
+      header: typeof header === 'string' ? header : '',
+      multiSelect: multiSelect === true,
+      options: options.map((o) => {
+        const opt = (o ?? {}) as Record<string, unknown>
+        return {
+          label: typeof opt.label === 'string' ? opt.label : String(opt.label ?? ''),
+          description: typeof opt.description === 'string' ? opt.description : '',
+          ...(typeof opt.preview === 'string' ? { preview: opt.preview } : {}),
+        }
+      }),
+    })
+  }
+  return questions
+}
+
+/** The allow-rule key for a Bash command: `program` or `program subcommand`. */
+function commandPrefix(command: string): string {
+  const tokens = command.trim().split(/\s+/)
+  const first = tokens[0] ?? ''
+  if (SUBCOMMANDED.has(first) && tokens[1] && !tokens[1].startsWith('-')) return `${first} ${tokens[1]}`
+  return first
+}
+
+/** Derive the rule to persist from a granted call. */
+function ruleFor(tool: string, input: Record<string, unknown>): { tool: string; match?: string } {
+  if (tool === 'Bash') {
+    const command = commandOf(input)
+    const match = command ? commandPrefix(command) : undefined
+    return match ? { tool, match } : { tool }
+  }
+  return { tool }
+}
+
+/** Does a stored rule cover this call? A rule without `match` allows the whole tool. */
+function matchesRule(rule: { tool: string; match?: string }, tool: string, input: Record<string, unknown>): boolean {
+  if (rule.tool !== tool) return false
+  if (!rule.match) return true
+  const command = commandOf(input)
+  return command !== undefined && commandPrefix(command) === rule.match
 }
 
 /** One line. The log is for skimming with a thumb, not for storing file reads. */

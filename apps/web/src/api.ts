@@ -1,11 +1,15 @@
 import type {
+  AnswerQuestionRequest,
   ApprovalRequest,
   CreateProjectRequest,
   CreateProjectResponse,
+  EnvEntry,
+  EnvFileResponse,
   GithubRepo,
   GithubReposResponse,
   NameCheckResponse,
   NewThreadResponse,
+  FileDiffResponse,
   Project,
   ProjectsResponse,
   PromptRequest,
@@ -104,6 +108,14 @@ export async function cancelBuild(projectId: string): Promise<void> {
   await expectOk(await fetch(`${BASE}/api/projects/${encodeURIComponent(projectId)}/build/cancel`, { method: 'POST' }))
 }
 
+/** Before/after text for one changed file, for the post-turn diff accordion. */
+export async function fetchFileDiff(projectId: string, base: string, path: string): Promise<FileDiffResponse> {
+  const url = `${BASE}/api/projects/${encodeURIComponent(projectId)}/changes?base=${encodeURIComponent(base)}&path=${encodeURIComponent(path)}`
+  const response = await fetch(url)
+  if (!response.ok) throw new ApiError(response.status, response.statusText)
+  return (await response.json()) as FileDiffResponse
+}
+
 /** The projects the picker shows. Authoritative — the server reads disk. */
 export async function fetchProjects(): Promise<Project[]> {
   const response = await fetch(`${BASE}/api/projects`)
@@ -136,16 +148,50 @@ export async function checkProjectName(name: string): Promise<NameCheckResponse 
   return (await response.json()) as NameCheckResponse
 }
 
-/** Resolves the promise `canUseTool` is parked on. 409 if already decided or expired. */
+/**
+ * Resolves the promise `canUseTool` is parked on. 409 if already decided or
+ * expired. `always` persists an allow-rule so this tool/command stops prompting.
+ */
 export async function decideApproval(
   approvalId: string,
   allow: boolean,
-  reason?: string,
+  opts: { reason?: string; always?: boolean } = {},
 ): Promise<void> {
   await post<void>(`/api/approvals/${encodeURIComponent(approvalId)}`, {
     allow,
-    ...(reason ? { reason } : {}),
+    ...(opts.reason ? { reason: opts.reason } : {}),
+    ...(opts.always ? { always: true } : {}),
   } satisfies ApprovalRequest)
+}
+
+/** Answer a parked AskUserQuestion. `answers` is keyed by question text. 409 if not pending. */
+export async function answerQuestion(requestId: string, answers: Record<string, string>): Promise<void> {
+  await post<void>(`/api/questions/${encodeURIComponent(requestId)}`, { answers } satisfies AnswerQuestionRequest)
+}
+
+const envUrl = (projectId: string): string => `${BASE}/api/projects/${encodeURIComponent(projectId)}/env`
+
+/** The project's .env as key/value entries, plus whether a .env.example exists. */
+export async function fetchEnv(projectId: string): Promise<EnvFileResponse> {
+  const response = await fetch(envUrl(projectId))
+  if (!response.ok) throw new ApiError(response.status, response.statusText)
+  return (await response.json()) as EnvFileResponse
+}
+
+/** A scaffold proposal from .env.example (keys, blank values). Not written until saved. */
+export async function initEnv(projectId: string): Promise<EnvFileResponse> {
+  return (await post<EnvFileResponse>(`/api/projects/${encodeURIComponent(projectId)}/env/init`, {}))!
+}
+
+/** Write the project's .env from these entries. 204 on success. */
+export async function saveEnv(projectId: string, entries: EnvEntry[]): Promise<void> {
+  await expectOk(
+    await fetch(envUrl(projectId), {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ entries }),
+    }),
+  )
 }
 
 /** The server's public VAPID key, fetched at enable time so key rotation is server-only. */

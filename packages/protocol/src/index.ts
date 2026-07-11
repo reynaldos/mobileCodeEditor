@@ -54,8 +54,20 @@ export type EventBody =
   | { type: 'approval_decision'; approvalId: string; allow: boolean; reason?: string }
   /** Appended on boot for any request whose deferred promise died with the process. */
   | { type: 'approval_expired'; approvalId: string }
+  /**
+   * A standing allow-rule the user created via "Always approve" (Phase 2.7).
+   * Projected per project into the auto-approve set: `tool` alone allows that
+   * tool; `match` (a Bash command prefix) narrows it to matching commands.
+   */
+  | { type: 'rule_allowed'; tool: string; match?: string }
   /** One assistant turn finished. The agent is alive and awaiting input. */
   | { type: 'turn_complete'; costUsd?: number; numTurns?: number }
+  /**
+   * Files a turn changed, vs the HEAD snapshot taken when the prompt was sent
+   * (Phase 2.7). Names + counts only — bounded, safe for the log; diff bodies are
+   * fetched per file on expand. `base` is the sha to diff against.
+   */
+  | { type: 'turn_changes'; base: string; files: ChangedFile[] }
   /**
    * A deliberate line under the conversation. Claude will not resume anything
    * before this point.
@@ -90,6 +102,15 @@ export type EventBody =
   | { type: 'thread_renamed'; title: string }
   /** A thread was hidden from the list. The events stay in the log (append-only). */
   | { type: 'thread_deleted' }
+  /**
+   * The agent asked a multiple-choice question (Phase 2.7 — the SDK's
+   * AskUserQuestion, delivered via onUserDialog). Blocks the turn until answered.
+   */
+  | { type: 'question_request'; requestId: string; toolUseId?: string; questions: Question[] }
+  /** The user answered; `answers` is keyed by question text (multi joined by ", "). */
+  | { type: 'question_answered'; requestId: string; answers: Record<string, string> }
+  /** The question was abandoned (turn aborted, or the server shut down). */
+  | { type: 'question_cancelled'; requestId: string }
 
 export type Event = EventEnvelope & EventBody
 export type EventType = EventBody['type']
@@ -139,6 +160,8 @@ export interface PromptResponse {
 export interface ApprovalRequest {
   allow: boolean
   reason?: string
+  /** "Always approve": persist an allow-rule so this tool/command stops prompting. */
+  always?: boolean
 }
 
 /** POST /api/conversations/new — reset one project's conversation. */
@@ -252,6 +275,65 @@ export type BuildStreamMessage =
   | { type: 'snapshot'; snapshot: BuildSnapshot }
   | { type: 'line'; line: string }
   | { type: 'phase'; phase: BuildPhase; error?: string; warning?: string }
+
+// --- Turn changes (Phase 2.7): what a turn touched -------------------------
+
+/** One file changed during a turn — names + counts; the diff is fetched per file. */
+export interface ChangedFile {
+  path: string
+  additions: number
+  deletions: number
+  status: 'added' | 'modified' | 'deleted' | 'renamed'
+}
+
+/** GET /api/projects/:id/changes?base=&path= — before/after for one file's diff. */
+export interface FileDiffResponse {
+  path: string
+  before: string
+  after: string
+}
+
+// --- Questions (Phase 2.7): the agent's AskUserQuestion, rendered inline ------
+
+/** One choice for a question. `preview` is optional richer content (unused for now). */
+export interface QuestionOption {
+  label: string
+  description: string
+  preview?: string
+}
+
+/** A single multiple-choice question — mirrors the SDK's AskUserQuestion schema. */
+export interface Question {
+  question: string
+  /** Short chip label, e.g. "Auth method". */
+  header: string
+  options: QuestionOption[]
+  multiSelect: boolean
+}
+
+/** POST /api/questions/:requestId — answers keyed by question text. */
+export interface AnswerQuestionRequest {
+  answers: Record<string, string>
+}
+
+// --- Project .env editor (Phase 2.7) ---------------------------------------
+
+/** One KEY=value line from a project's .env. */
+export interface EnvEntry {
+  key: string
+  value: string
+}
+
+/** GET /api/projects/:id/env — the project's .env, plus whether a .env.example exists. */
+export interface EnvFileResponse {
+  entries: EnvEntry[]
+  hasExample: boolean
+}
+
+/** PUT /api/projects/:id/env — replace the file with these entries. */
+export interface SaveEnvRequest {
+  entries: EnvEntry[]
+}
 
 // --- GitHub integration, for the picker's clone/create forms ---------------
 

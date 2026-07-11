@@ -11,12 +11,15 @@ import type { Pusher } from './push.ts'
 import type { PushStore } from './push-store.ts'
 import { registerApprovals } from './routes/approvals.ts'
 import { registerBuild } from './routes/build.ts'
+import { registerChanges } from './routes/changes.ts'
 import { registerDebug } from './routes/debug.ts'
+import { registerEnv } from './routes/env.ts'
 import { registerEvents } from './routes/events.ts'
 import { registerGithub } from './routes/github.ts'
 import { registerProjects } from './routes/projects.ts'
 import { registerPrompt } from './routes/prompt.ts'
 import { registerPush } from './routes/push.ts'
+import { registerQuestions } from './routes/questions.ts'
 import { registerThreads } from './routes/threads.ts'
 import type { SessionManager } from './session-manager.ts'
 
@@ -56,10 +59,13 @@ export async function buildServer(config: Config, services: Services): Promise<F
   registerEvents(app, log, config)
   registerProjects(app, projects)
   registerBuild(app, builds, projects, config)
+  registerChanges(app, projects)
+  registerEnv(app, projects)
   registerThreads(app, log, projects, sessions)
   registerGithub(app, projects, github)
   registerPrompt(app, sessions)
   registerApprovals(app, sessions)
+  registerQuestions(app, sessions)
   registerPush(app, config, pushStore, pusher)
   registerDebug(app, log, config)
 
