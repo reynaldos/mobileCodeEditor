@@ -79,6 +79,10 @@ export type EventBody =
   | { type: 'project_created'; name: string; repoUrl?: string }
   /** Clone/init failed; the partial directory is cleaned up. */
   | { type: 'project_create_failed'; name: string; error: string }
+  /** A thread was given a custom title (Phase 2.5). threadId on the envelope. */
+  | { type: 'thread_renamed'; title: string }
+  /** A thread was hidden from the list. The events stay in the log (append-only). */
+  | { type: 'thread_deleted' }
 
 export type Event = EventEnvelope & EventBody
 export type EventType = EventBody['type']
@@ -182,6 +186,11 @@ export interface ThreadsResponse {
 /** POST /api/projects/:projectId/threads — start a fresh thread. */
 export interface NewThreadResponse {
   threadId: string
+}
+
+/** PATCH /api/projects/:projectId/threads/:threadId — set a custom title. */
+export interface RenameThreadRequest {
+  title: string
 }
 
 /** GET /api/projects */

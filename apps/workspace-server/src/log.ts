@@ -184,6 +184,10 @@ export class EventLog {
    * A thread only "exists" once it has a conversation event, so a freshly-minted
    * thread with no prompt yet won't appear until its first message — which is what
    * the client wants (empty threads aren't worth listing).
+   *
+   * A `thread_deleted` event hides the thread; its rows stay in the log (append-
+   * only) but drop out of the list. `thread_renamed`/`thread_deleted` are metadata,
+   * not conversation, so they don't count toward activity or the message count.
    */
   threadsOf(projectId: string): Array<{
     id: string | null
@@ -193,23 +197,41 @@ export class EventLog {
   }> {
     const rows = this.#db
       .prepare(
-        `SELECT thread_id AS id, MAX(ts) AS lastActivity, COUNT(*) AS messageCount
+        `SELECT thread_id AS id,
+                MAX(CASE WHEN type NOT IN ('thread_renamed', 'thread_deleted') THEN ts END) AS lastActivity,
+                SUM(CASE WHEN type NOT IN ('thread_renamed', 'thread_deleted') THEN 1 ELSE 0 END) AS messageCount,
+                MAX(CASE WHEN type = 'thread_deleted' THEN 1 ELSE 0 END) AS deleted
            FROM events
           WHERE project_id = ?
             AND type NOT IN ('project_created', 'project_create_failed')
           GROUP BY thread_id
+         HAVING deleted = 0 AND messageCount > 0
           ORDER BY lastActivity DESC`,
       )
       .all(projectId) as Array<{ id: string | null; lastActivity: number; messageCount: number }>
 
-    // A concise title from the first prompt — computed per group, cleaner than a
-    // correlated subquery once NULL thread_ids are in play.
+    // A custom title wins; otherwise a concise line from the first prompt —
+    // computed per group, cleaner than a correlated subquery with NULL thread_ids.
     return rows.map((r) => ({
       id: r.id,
-      title: titleize(this.#firstPromptOf(projectId, r.id)),
+      title: this.#customTitleOf(projectId, r.id) ?? titleize(this.#firstPromptOf(projectId, r.id)),
       lastActivity: r.lastActivity,
       messageCount: r.messageCount,
     }))
+  }
+
+  /** The latest custom title for a thread, if it's been renamed. Legacy has none. */
+  #customTitleOf(projectId: string, threadId: string | null): string | undefined {
+    if (threadId === null) return undefined
+    const row = this.#db
+      .prepare(
+        `SELECT json_extract(payload, '$.title') AS title
+           FROM events
+          WHERE project_id = ? AND thread_id = ? AND type = 'thread_renamed'
+          ORDER BY seq DESC LIMIT 1`,
+      )
+      .get(projectId, threadId) as { title: string | null } | undefined
+    return row?.title ?? undefined
   }
 
   #firstPromptOf(projectId: string, threadId: string | null): string | undefined {
