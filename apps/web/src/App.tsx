@@ -1,5 +1,5 @@
 import { LEGACY_THREAD_ID } from '@mce/protocol'
-import { ChevronDown, History, SquarePen } from 'lucide-react'
+import { ChevronDown, History, MessageCirclePlus } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import { deleteThread, fetchHealth, type Health, renameThread } from './api.ts'
 import { MessageList } from './components/MessageList.tsx'
@@ -115,7 +115,7 @@ export function App(): React.JSX.Element {
                   setOverlay(null)
                 }}
               >
-                <SquarePen className="size-[18px]" />
+                <MessageCirclePlus className="size-[18px]" />
               </button>
             </>
           )}
