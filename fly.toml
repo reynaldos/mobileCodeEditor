@@ -1,0 +1,43 @@
+# Fly deployment.
+#
+# PRIVATE-ONLY by design: there is no [http_service] / [[services]] block, so
+# nothing is published on *.fly.dev. Access is over Tailscale running INSIDE the
+# container (see docker-entrypoint.sh) — the same "nothing public, no auth on the
+# server" model as the VM. The server listens on 3000 internally; Tailscale
+# proxies the tailnet HTTPS endpoint to it.
+#
+# Full walkthrough: docs/DEPLOY-FLY.md.
+
+# `fly launch`/`fly apps create` sets this to a globally-unique name. Change it
+# if "mce-workspace" is taken.
+app = "mce-workspace"
+primary_region = "iad"   # Ashburn, US East. Pick the region nearest you.
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  # Non-secret config. Secrets go through `fly secrets set` — never in this file.
+  GIT_AUTHOR_NAME = "rey sanchez"
+  GIT_AUTHOR_EMAIL = "rey.sanchez.dev@gmail.com"
+  # An empty projects dir self-populates from this on first boot.
+  PROJECT_REPO = "https://github.com/reynaldos/fitnessTracker.git"
+  # Fly Machines allow ONE volume, so everything lives under /data — the log, the
+  # projects, and Tailscale state. This override points the project there.
+  PROJECT_PATH = "/data/projects/app"
+  # The machine's name on your tailnet → https://mce.<tailnet>.ts.net
+  TS_HOSTNAME = "mce"
+
+# The one and only volume Fly permits per machine. Holds the event log
+# (/data/events.db), the cloned projects (/data/projects), and Tailscale's node
+# state (/data/tailscale) — everything that must survive a restart.
+[[mounts]]
+  source = "mce_data"
+  destination = "/data"
+
+# Always-on: no autostop (there is no service to idle on). Start at 2 GB;
+# `fly scale memory 4096` if the agent + a dev server + a build ever OOM.
+[[vm]]
+  cpu_kind = "shared"
+  cpus = 2
+  memory = "2gb"
