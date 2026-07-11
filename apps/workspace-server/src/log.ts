@@ -129,6 +129,23 @@ export class EventLog {
       .all() as Array<{ approvalId: string; sessionId: string; projectId: string }>
   }
 
+  /** Questions parked when the process died — cancelled on boot, like approvals. */
+  pendingQuestions(): Array<{ requestId: string; sessionId: string; projectId: string }> {
+    return this.#db
+      .prepare(
+        `SELECT json_extract(payload, '$.requestId') AS requestId,
+                session_id AS sessionId,
+                project_id AS projectId
+           FROM events
+          WHERE type = 'question_request'
+            AND json_extract(payload, '$.requestId') NOT IN (
+                  SELECT json_extract(payload, '$.requestId')
+                    FROM events
+                   WHERE type IN ('question_answered', 'question_cancelled'))`,
+      )
+      .all() as Array<{ requestId: string; sessionId: string; projectId: string }>
+  }
+
   /** Sessions that started and never ended: the process died mid-generator. */
   openSessions(): Array<{ sessionId: string; projectId: string }> {
     return this.#db

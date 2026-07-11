@@ -18,6 +18,7 @@ import { registerGithub } from './routes/github.ts'
 import { registerProjects } from './routes/projects.ts'
 import { registerPrompt } from './routes/prompt.ts'
 import { registerPush } from './routes/push.ts'
+import { registerQuestions } from './routes/questions.ts'
 import { registerThreads } from './routes/threads.ts'
 import type { SessionManager } from './session-manager.ts'
 
@@ -62,6 +63,7 @@ export async function buildServer(config: Config, services: Services): Promise<F
   registerGithub(app, projects, github)
   registerPrompt(app, sessions)
   registerApprovals(app, sessions)
+  registerQuestions(app, sessions)
   registerPush(app, config, pushStore, pusher)
   registerDebug(app, log, config)
 

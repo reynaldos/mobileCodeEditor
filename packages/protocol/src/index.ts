@@ -102,6 +102,15 @@ export type EventBody =
   | { type: 'thread_renamed'; title: string }
   /** A thread was hidden from the list. The events stay in the log (append-only). */
   | { type: 'thread_deleted' }
+  /**
+   * The agent asked a multiple-choice question (Phase 2.7 — the SDK's
+   * AskUserQuestion, delivered via onUserDialog). Blocks the turn until answered.
+   */
+  | { type: 'question_request'; requestId: string; toolUseId?: string; questions: Question[] }
+  /** The user answered; `answers` is keyed by question text (multi joined by ", "). */
+  | { type: 'question_answered'; requestId: string; answers: Record<string, string> }
+  /** The question was abandoned (turn aborted, or the server shut down). */
+  | { type: 'question_cancelled'; requestId: string }
 
 export type Event = EventEnvelope & EventBody
 export type EventType = EventBody['type']
@@ -282,6 +291,29 @@ export interface FileDiffResponse {
   path: string
   before: string
   after: string
+}
+
+// --- Questions (Phase 2.7): the agent's AskUserQuestion, rendered inline ------
+
+/** One choice for a question. `preview` is optional richer content (unused for now). */
+export interface QuestionOption {
+  label: string
+  description: string
+  preview?: string
+}
+
+/** A single multiple-choice question — mirrors the SDK's AskUserQuestion schema. */
+export interface Question {
+  question: string
+  /** Short chip label, e.g. "Auth method". */
+  header: string
+  options: QuestionOption[]
+  multiSelect: boolean
+}
+
+/** POST /api/questions/:requestId — answers keyed by question text. */
+export interface AnswerQuestionRequest {
+  answers: Record<string, string>
 }
 
 // --- GitHub integration, for the picker's clone/create forms ---------------

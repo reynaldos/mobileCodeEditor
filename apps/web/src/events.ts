@@ -1,4 +1,4 @@
-import { LEGACY_THREAD_ID, type ChangedFile, type Event } from '@mce/protocol'
+import { LEGACY_THREAD_ID, type ChangedFile, type Event, type Question } from '@mce/protocol'
 
 /**
  * A reducer over the event union. Events in, renderable per-thread views out.
@@ -36,6 +36,14 @@ export type Item =
     }
   | { kind: 'turn'; key: string }
   | { kind: 'changes'; key: string; base: string; files: ChangedFile[] }
+  | {
+      kind: 'question'
+      key: string
+      requestId: string
+      questions: Question[]
+      status: 'pending' | 'answered' | 'cancelled'
+      answers?: Record<string, string>
+    }
   | { kind: 'ended'; key: string; reason: string; message?: string }
 
 export type AgentState = 'idle' | 'thinking' | 'awaiting_approval' | 'awaiting_input' | 'ended'
@@ -45,6 +53,7 @@ export interface ProjectState {
   items: Item[]
   toolIndex: Record<string, number>
   approvalIndex: Record<string, number>
+  questionIndex: Record<string, number>
   agent: AgentState
   sessionId: string | null
 }
@@ -53,6 +62,7 @@ export const emptyProjectState: ProjectState = {
   items: [],
   toolIndex: {},
   approvalIndex: {},
+  questionIndex: {},
   agent: 'idle',
   sessionId: null,
 }
@@ -195,6 +205,32 @@ function reduceProject(state: ProjectState, event: Event): ProjectState {
 
       const items = replace(state.items, index!, { ...item, status, ...(reason ? { reason } : {}) })
       const stillWaiting = items.some((i) => i.kind === 'approval' && i.status === 'pending')
+      return { ...state, items, agent: stillWaiting ? 'awaiting_approval' : 'thinking' }
+    }
+
+    case 'question_request':
+      return {
+        ...state,
+        agent: 'awaiting_approval',
+        items: [
+          ...state.items,
+          { kind: 'question', key, requestId: event.requestId, questions: event.questions, status: 'pending' },
+        ],
+        questionIndex: { ...state.questionIndex, [event.requestId]: state.items.length },
+      }
+
+    case 'question_answered':
+    case 'question_cancelled': {
+      const index = state.questionIndex[event.requestId]
+      const item = index === undefined ? undefined : state.items[index]
+      if (item?.kind !== 'question') return state
+      const answered = event.type === 'question_answered'
+      const items = replace(state.items, index!, {
+        ...item,
+        status: answered ? 'answered' : 'cancelled',
+        ...(answered ? { answers: event.answers } : {}),
+      })
+      const stillWaiting = items.some((i) => i.kind === 'question' && i.status === 'pending')
       return { ...state, items, agent: stillWaiting ? 'awaiting_approval' : 'thinking' }
     }
 

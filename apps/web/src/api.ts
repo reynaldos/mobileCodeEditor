@@ -1,4 +1,5 @@
 import type {
+  AnswerQuestionRequest,
   ApprovalRequest,
   CreateProjectRequest,
   CreateProjectResponse,
@@ -159,6 +160,11 @@ export async function decideApproval(
     ...(opts.reason ? { reason: opts.reason } : {}),
     ...(opts.always ? { always: true } : {}),
   } satisfies ApprovalRequest)
+}
+
+/** Answer a parked AskUserQuestion. `answers` is keyed by question text. 409 if not pending. */
+export async function answerQuestion(requestId: string, answers: Record<string, string>): Promise<void> {
+  await post<void>(`/api/questions/${encodeURIComponent(requestId)}`, { answers } satisfies AnswerQuestionRequest)
 }
 
 /** The server's public VAPID key, fetched at enable time so key rotation is server-only. */

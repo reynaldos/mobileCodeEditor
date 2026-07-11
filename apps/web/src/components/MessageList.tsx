@@ -3,6 +3,7 @@ import type { Item } from '../events.ts'
 import { relativePath, targetOf } from '../paths.ts'
 import { ApprovalCard } from './ApprovalCard.tsx'
 import { ChangesView } from './ChangesView.tsx'
+import { QuestionCard } from './QuestionCard.tsx'
 
 interface Props {
   items: Item[]
@@ -20,7 +21,9 @@ const SEPARATOR = 'flex justify-center gap-2 py-1 text-[11px] uppercase tracking
 export function MessageList({ items, projectId }: Props): React.JSX.Element {
   const bottom = useRef<HTMLDivElement>(null)
 
-  const pendingKey = items.find((i) => i.kind === 'approval' && i.status === 'pending')?.key
+  const pendingKey = items.find(
+    (i) => (i.kind === 'approval' || i.kind === 'question') && i.status === 'pending',
+  )?.key
 
   useEffect(() => {
     // A pending approval blocks the agent, so it must never sit below the fold.
@@ -68,6 +71,9 @@ function Row({ item, projectId }: { item: Item; projectId?: string }): React.JSX
 
     case 'approval':
       return <ApprovalCard item={item} projectId={projectId} />
+
+    case 'question':
+      return <QuestionCard item={item} />
 
     // One line, skimmable with a thumb. Not expandable JSON.
     case 'tool': {
