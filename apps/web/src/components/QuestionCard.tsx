@@ -128,25 +128,6 @@ export function QuestionCard({ item }: { item: QuestionItem }): React.JSX.Elemen
           </div>
         ))}
 
-        {pending && item.questions.length > 1 && (
-          <div className="flex gap-2">
-            <button
-              className="min-h-9 flex-1 rounded-[10px] border border-line bg-panel-2 text-[13px] text-fg disabled:opacity-40"
-              disabled={activeIndex === 0}
-              onClick={() => setActive((i) => Math.max(0, i - 1))}
-            >
-              Back
-            </button>
-            <button
-              className="min-h-9 flex-1 rounded-[10px] border border-line bg-panel-2 text-[13px] text-fg disabled:opacity-40"
-              disabled={activeIndex >= item.questions.length - 1}
-              onClick={() => setActive((i) => Math.min(item.questions.length - 1, i + 1))}
-            >
-              Next
-            </button>
-          </div>
-        )}
-
         {error && <p className="text-[13px] text-del">{error}</p>}
 
         {pending && (
@@ -182,11 +163,6 @@ function QuestionBlock({
 }): React.JSX.Element {
   return (
     <div>
-      {q.header && (
-        <span className="mb-1.5 inline-block rounded border border-line px-1.5 py-px text-[10px] uppercase tracking-wide text-muted">
-          {q.header}
-        </span>
-      )}
       <p className="mb-2 font-medium">{q.question}</p>
 
       {answer !== undefined ? (
