@@ -1,4 +1,15 @@
-import type { ApprovalRequest, PromptRequest, PromptResponse } from '@mce/protocol'
+import type {
+  ApprovalRequest,
+  CreateProjectRequest,
+  CreateProjectResponse,
+  GithubRepo,
+  GithubReposResponse,
+  NameCheckResponse,
+  Project,
+  ProjectsResponse,
+  PromptRequest,
+  PromptResponse,
+} from '@mce/protocol'
 
 /**
  * Every server call goes through this file.
@@ -38,16 +49,52 @@ async function post<T>(path: string, body: unknown): Promise<T | undefined> {
 }
 
 /** 202. The answer arrives over SSE, not in this response. */
-export async function sendPrompt(text: string): Promise<PromptResponse> {
-  return (await post<PromptResponse>('/api/prompt', { text } satisfies PromptRequest))!
+export async function sendPrompt(text: string, projectId: string, fresh?: boolean): Promise<PromptResponse> {
+  return (await post<PromptResponse>('/api/prompt', {
+    text,
+    projectId,
+    ...(fresh ? { fresh } : {}),
+  } satisfies PromptRequest))!
 }
 
 /**
- * Ends the live session and draws a line in the log. The next prompt starts a
- * conversation Claude has no memory of.
+ * Ends the project's live session and draws a line in the log. The next prompt
+ * to it starts a conversation Claude has no memory of.
  */
-export async function startNewConversation(): Promise<void> {
-  await post<void>('/api/conversations/new', {})
+export async function startNewConversation(projectId: string): Promise<void> {
+  await post<void>('/api/conversations/new', { projectId })
+}
+
+/** The projects the picker shows. Authoritative — the server reads disk. */
+export async function fetchProjects(): Promise<Project[]> {
+  const response = await fetch(`${BASE}/api/projects`)
+  if (!response.ok) throw new ApiError(response.status, response.statusText)
+  return ((await response.json()) as ProjectsResponse).projects
+}
+
+/**
+ * Clone (repoUrl) or create (name). Returns 202 with the projectId; watch the
+ * event stream for `project_created` / `project_create_failed`, since a clone
+ * is slow.
+ */
+export async function createProject(body: CreateProjectRequest): Promise<CreateProjectResponse> {
+  return (await post<CreateProjectResponse>('/api/projects', body))!
+}
+
+/** Clone suggestions. Empty when GitHub isn't configured — the field still takes a URL. */
+export async function fetchGithubRepos(q: string): Promise<GithubRepo[]> {
+  const response = await fetch(`${BASE}/api/github/repos?q=${encodeURIComponent(q)}`)
+  if (response.status === 503) return []
+  if (!response.ok) throw new ApiError(response.status, response.statusText)
+  return ((await response.json()) as GithubReposResponse).repos
+}
+
+/** null when GitHub isn't configured — skip the availability UI in that case. */
+export async function checkProjectName(name: string): Promise<NameCheckResponse | null> {
+  const response = await fetch(`${BASE}/api/github/check-name?name=${encodeURIComponent(name)}`)
+  if (response.status === 503) return null
+  if (!response.ok) throw new ApiError(response.status, response.statusText)
+  return (await response.json()) as NameCheckResponse
 }
 
 /** Resolves the promise `canUseTool` is parked on. 409 if already decided or expired. */
@@ -79,10 +126,9 @@ export async function unsubscribePush(endpoint: string): Promise<void> {
 
 export interface Health {
   ok: boolean
-  projectId: string
-  projectPath: string
   lastSeq: number
-  sessionId: string | null
+  projectCount: number
+  liveSessions: number
   agentReady: boolean
   pushReady: boolean
 }

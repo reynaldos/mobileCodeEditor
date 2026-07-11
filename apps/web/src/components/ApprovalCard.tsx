@@ -24,7 +24,7 @@ const STATUS: Record<Approval['status'], string> = {
 
 interface Props {
   item: Approval
-  projectPath?: string
+  projectId?: string
 }
 
 /**
@@ -32,7 +32,7 @@ interface Props {
  * separate diff tab, because the conversation IS the review: you scroll, read
  * what Claude intends, see the diff in place, tap, and keep scrolling.
  */
-export function ApprovalCard({ item, projectPath }: Props): React.JSX.Element {
+export function ApprovalCard({ item, projectId }: Props): React.JSX.Element {
   const [sending, setSending] = useState(false)
   const [error, setError] = useState<string | undefined>()
 
@@ -72,7 +72,7 @@ export function ApprovalCard({ item, projectPath }: Props): React.JSX.Element {
       {/* The SDK phrases this when it can, but often doesn't. Fall back to
           something that names the file rather than just the tool. */}
       <p className="mx-3 mt-1.5 font-medium">
-        {item.title ?? describeTool(item.tool, item.input, projectPath)}
+        {item.title ?? describeTool(item.tool, item.input, projectId)}
       </p>
       {item.description && <p className="mx-3 mt-1 text-[13px] text-muted">{item.description}</p>}
 
@@ -80,7 +80,7 @@ export function ApprovalCard({ item, projectPath }: Props): React.JSX.Element {
         <DiffView
           subject={{
             ...subject,
-            filePath: subject.filePath ? relativePath(subject.filePath, projectPath) : undefined,
+            filePath: subject.filePath ? relativePath(subject.filePath, projectId) : undefined,
           }}
         />
       ) : (

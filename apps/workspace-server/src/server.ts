@@ -3,13 +3,17 @@ import fastifyStatic from '@fastify/static'
 import Fastify, { type FastifyInstance } from 'fastify'
 import { existsSync } from 'node:fs'
 import type { Config } from './config.ts'
+import type { Github } from './github.ts'
 import type { EventLog } from './log.ts'
+import type { ProjectStore } from './projects.ts'
 import type { Pusher } from './push.ts'
 import type { PushStore } from './push-store.ts'
 import { registerApprovals } from './routes/approvals.ts'
 import { registerConversations } from './routes/conversations.ts'
 import { registerDebug } from './routes/debug.ts'
 import { registerEvents } from './routes/events.ts'
+import { registerGithub } from './routes/github.ts'
+import { registerProjects } from './routes/projects.ts'
 import { registerPrompt } from './routes/prompt.ts'
 import { registerPush } from './routes/push.ts'
 import type { SessionManager } from './session-manager.ts'
@@ -17,12 +21,14 @@ import type { SessionManager } from './session-manager.ts'
 export interface Services {
   log: EventLog
   sessions: SessionManager
+  projects: ProjectStore
+  github: Github | undefined
   pushStore: PushStore
   pusher: Pusher
 }
 
 export async function buildServer(config: Config, services: Services): Promise<FastifyInstance> {
-  const { log, sessions, pushStore, pusher } = services
+  const { log, sessions, projects, github, pushStore, pusher } = services
   const app = Fastify({
     logger: config.isDev
       ? { transport: { target: 'pino-pretty', options: { translateTime: 'HH:MM:ss' } } }
@@ -37,17 +43,16 @@ export async function buildServer(config: Config, services: Services): Promise<F
 
   app.get('/api/health', async () => ({
     ok: true,
-    projectId: config.projectId,
-    projectPath: config.projectPath,
     lastSeq: log.lastSeq(),
-    sessionId: sessions.currentSessionId ?? null,
-    // The conversation your next prompt would continue. null means a clean start.
-    resumes: sessions.resumableConversationId ?? null,
+    projectCount: projects.list().length,
+    liveSessions: sessions.liveSessionCount,
     agentReady: Boolean(config.claudeToken),
     pushReady: pusher.enabled,
   }))
 
   registerEvents(app, log, config)
+  registerProjects(app, projects)
+  registerGithub(app, projects, github)
   registerPrompt(app, sessions)
   registerApprovals(app, sessions)
   registerConversations(app, sessions)

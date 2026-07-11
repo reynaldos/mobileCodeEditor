@@ -66,6 +66,14 @@ export type EventBody =
       costUsd?: number
       message?: string
     }
+  /**
+   * A project was cloned or created (Phase 2). The `projectId` on the envelope is
+   * the new project. Recorded in the log — the picker derives "created how / when"
+   * from it — while the filesystem stays the source of truth for *existence*.
+   */
+  | { type: 'project_created'; name: string; repoUrl?: string }
+  /** Clone/init failed; the partial directory is cleaned up. */
+  | { type: 'project_create_failed'; name: string; error: string }
 
 export type Event = EventEnvelope & EventBody
 export type EventType = EventBody['type']
@@ -98,6 +106,8 @@ export type SessionStatus =
 /** POST /api/prompt */
 export interface PromptRequest {
   text: string
+  /** Which project this prompt targets. Each project keeps its own conversation. */
+  projectId: string
   /**
    * Start a new Claude conversation instead of continuing the last one.
    *
@@ -116,6 +126,82 @@ export interface PromptResponse {
 /** POST /api/approvals/:approvalId — 204, or 409 if already decided or expired. */
 export interface ApprovalRequest {
   allow: boolean
+  reason?: string
+}
+
+/** POST /api/conversations/new — reset one project's conversation. */
+export interface NewConversationRequest {
+  projectId: string
+}
+
+// ---------------------------------------------------------------------------
+// Projects (Phase 2). A project is a directory under /projects; the filesystem
+// is the source of truth for existence, the log for how it was created.
+// ---------------------------------------------------------------------------
+
+/** A project as the client sees it. `id` is the directory name; no server path leaks out. */
+export interface Project {
+  id: string
+  name: string
+  /** git remote origin, if the project is a clone. */
+  repoUrl?: string
+  /** Current branch, best-effort. */
+  branch?: string
+  /** From the `project_created` event, if we have one. */
+  createdAt?: number
+}
+
+/** GET /api/projects */
+export interface ProjectsResponse {
+  projects: Project[]
+}
+
+export type Visibility = 'public' | 'private'
+
+/**
+ * POST /api/projects — create a project, three ways:
+ *  - `repoUrl`                → clone an existing repo
+ *  - `name` + `visibility`    → create a new GitHub repo, then clone it
+ *  - `name` alone             → a local `git init` (fallback, no remote)
+ *
+ * Returns 202; watch SSE for `project_created` / `project_create_failed`.
+ */
+export interface CreateProjectRequest {
+  repoUrl?: string
+  name?: string
+  visibility?: Visibility
+}
+
+export interface CreateProjectResponse {
+  projectId: string
+}
+
+// --- GitHub integration, for the picker's clone/create forms ---------------
+
+/** A repo the user can clone, from `gh`. Owned repos are prioritized. */
+export interface GithubRepo {
+  nameWithOwner: string
+  owner: string
+  description?: string
+  private: boolean
+  url: string
+  cloneUrl: string
+  /** True when the authenticated user owns it — the picker sorts these first. */
+  isOwn: boolean
+}
+
+/** GET /api/github/repos?q= — clone suggestions, debounced on the client. */
+export interface GithubReposResponse {
+  repos: GithubRepo[]
+}
+
+/** GET /api/github/check-name?name= — is this name free to create? */
+export interface NameCheckResponse {
+  name: string
+  /** The GitHub account the repo would be created under. */
+  owner: string
+  available: boolean
+  /** Why not, when unavailable: 'exists-local' | 'exists-remote' | 'invalid'. */
   reason?: string
 }
 
