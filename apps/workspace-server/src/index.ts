@@ -1,6 +1,7 @@
 import { loadConfig, secretsOf } from './config.ts'
 import { openDb } from './db.ts'
 import { acquireLock } from './lock.ts'
+import { Github } from './github.ts'
 import { EventLog } from './log.ts'
 import { Notifier } from './notifier.ts'
 import { ProjectStore } from './projects.ts'
@@ -19,7 +20,10 @@ const lock = await acquireLock(`${config.dbPath}.lock`)
 
 const db = openDb(config.dbPath)
 const log = new EventLog(db, makeRedactor(secretsOf(config)))
-const projects = new ProjectStore(config.projectsRoot, log)
+// gh authenticates from GH_TOKEN in the container. Absent → GitHub features off,
+// and the picker degrades to plain URL paste + local create.
+const github = process.env.GH_TOKEN ? new Github() : undefined
+const projects = new ProjectStore(config.projectsRoot, log, github)
 const sessions = new SessionManager(log, config, projects)
 const pushStore = new PushStore(db)
 const pusher = new Pusher(pushStore, config.vapid)
@@ -31,7 +35,7 @@ sessions.recoverOnBoot()
 const notifier = new Notifier(log, pusher)
 notifier.start()
 
-const app = await buildServer(config, { log, sessions, projects, pushStore, pusher })
+const app = await buildServer(config, { log, sessions, projects, github, pushStore, pusher })
 
 await app.listen({ port: config.port, host: config.host })
 app.log.info(

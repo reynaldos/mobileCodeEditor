@@ -1,8 +1,9 @@
-import type { Project } from '@mce/protocol'
+import type { Project, Visibility } from '@mce/protocol'
 import { execFile, execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, readdirSync, rmSync, statSync } from 'node:fs'
 import { basename, join, resolve } from 'node:path'
 import { promisify } from 'node:util'
+import type { Github } from './github.ts'
 import type { EventLog } from './log.ts'
 
 const run = promisify(execFile)
@@ -18,10 +19,12 @@ const run = promisify(execFile)
 export class ProjectStore {
   readonly #root: string
   readonly #log: EventLog
+  readonly #github: Github | undefined
 
-  constructor(projectsRoot: string, log: EventLog) {
+  constructor(projectsRoot: string, log: EventLog, github?: Github) {
     this.#root = resolve(projectsRoot)
     this.#log = log
+    this.#github = github
     mkdirSync(this.#root, { recursive: true })
   }
 
@@ -66,9 +69,12 @@ export class ProjectStore {
    * 202 and the client can watch for it), then does the slow work in the
    * background, emitting `project_created` or `project_create_failed`.
    */
-  create(input: { repoUrl?: string; name?: string }): { projectId: string } {
-    const id = sanitize(input.name ?? (input.repoUrl ? repoName(input.repoUrl) : ''))
+  create(input: { repoUrl?: string; name?: string; visibility?: Visibility }): { projectId: string } {
+    const id = sanitizeProjectName(input.name ?? (input.repoUrl ? repoName(input.repoUrl) : ''))
     if (!id) throw new CreateError('a name or a repo URL is required')
+    if (input.visibility && !this.#github) {
+      throw new CreateError('creating a GitHub repo needs gh — set GH_TOKEN')
+    }
 
     const path = this.pathOf(id)
     if (!path) throw new CreateError(`invalid project name: ${id}`)
@@ -79,17 +85,28 @@ export class ProjectStore {
     return { projectId: id }
   }
 
-  async #build(id: string, path: string, input: { repoUrl?: string }): Promise<void> {
+  async #build(
+    id: string,
+    path: string,
+    input: { repoUrl?: string; visibility?: Visibility },
+  ): Promise<void> {
+    let repoUrl = input.repoUrl
     try {
-      if (input.repoUrl) {
+      if (input.visibility && this.#github) {
+        // Create the GitHub repo first, then clone it — so the project has a
+        // remote and `git push` works from the first commit.
+        repoUrl = await this.#github.createRepo(id, input.visibility)
+      }
+
+      if (repoUrl) {
         // `gh auth setup-git` (entrypoint) configured the credential helper, so a
         // plain clone works for private repos too. argv array — no shell.
-        await run('git', ['clone', input.repoUrl, path], { timeout: 5 * 60_000 })
+        await run('git', ['clone', repoUrl, path], { timeout: 5 * 60_000 })
       } else {
         mkdirSync(path, { recursive: true })
         await run('git', ['-C', path, 'init', '-b', 'main'])
       }
-      this.#emit({ type: 'project_created', name: id, ...(input.repoUrl ? { repoUrl: input.repoUrl } : {}) }, id)
+      this.#emit({ type: 'project_created', name: id, ...(repoUrl ? { repoUrl } : {}) }, id)
     } catch (err) {
       // Don't leave a half-cloned directory behind — the next attempt would 409.
       try {
@@ -115,7 +132,7 @@ export class ProjectStore {
 export class CreateError extends Error {}
 
 /** Directory-safe project id: letters, digits, dot, dash, underscore. */
-function sanitize(name: string): string {
+export function sanitizeProjectName(name: string): string {
   return name
     .trim()
     .replace(/\.git$/i, '')

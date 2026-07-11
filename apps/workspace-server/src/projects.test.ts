@@ -7,7 +7,8 @@ import { test } from 'node:test'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { openDb } from './db.ts'
 import { EventLog } from './log.ts'
-import { CreateError, ProjectStore } from './projects.ts'
+import type { Github } from './github.ts'
+import { CreateError, ProjectStore, sanitizeProjectName } from './projects.ts'
 import { makeRedactor } from './redact.ts'
 
 function freshStore(): { store: ProjectStore; log: EventLog; root: string } {
@@ -87,6 +88,43 @@ test('creating a name that already exists is a CreateError', () => {
 test('create with neither name nor repoUrl is a CreateError', () => {
   const { store } = freshStore()
   assert.throws(() => store.create({}), CreateError)
+})
+
+test('create with visibility but no github configured is a CreateError', () => {
+  const { store } = freshStore()
+  assert.throws(() => store.create({ name: 'x', visibility: 'private' }), CreateError)
+})
+
+test('sanitizeProjectName strips path separators and trims', () => {
+  assert.equal(sanitizeProjectName('../../etc/passwd'), 'etc-passwd')
+  assert.equal(sanitizeProjectName('My Cool Repo!'), 'My-Cool-Repo')
+  assert.equal(sanitizeProjectName('repo.git'), 'repo')
+  assert.equal(sanitizeProjectName('  ...  '), '')
+})
+
+test('create-on-github creates the repo then clones it', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'mce-store-'))
+  const log = new EventLog(openDb(':memory:'), makeRedactor([]))
+
+  // A local bare repo stands in for the GitHub remote; a real `git clone` runs.
+  const origin = join(mkdtempSync(join(tmpdir(), 'mce-origin-')), 'origin.git')
+  execFileSync('git', ['init', '--bare', '-q', origin])
+
+  let created: { name: string; vis: string } | undefined
+  const fakeGithub = {
+    createRepo: async (name: string, vis: string) => {
+      created = { name, vis }
+      return `file://${origin}`
+    },
+  } as unknown as Github
+
+  const store = new ProjectStore(root, log, fakeGithub)
+  const { projectId } = store.create({ name: 'made-remote', visibility: 'private' })
+  assert.equal(projectId, 'made-remote')
+
+  await waitFor(() => log.projectCreations().some((e) => e.name === 'made-remote'), 'project_created')
+  assert.deepEqual(created, { name: 'made-remote', vis: 'private' })
+  assert.ok(existsSync(join(root, 'made-remote', '.git')), 'cloned the created repo')
 })
 
 async function waitFor(predicate: () => boolean, label: string, ms = 5000): Promise<void> {

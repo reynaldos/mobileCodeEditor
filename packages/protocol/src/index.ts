@@ -156,18 +156,53 @@ export interface ProjectsResponse {
   projects: Project[]
 }
 
+export type Visibility = 'public' | 'private'
+
 /**
- * POST /api/projects — create a project. Provide `repoUrl` to clone, or `name`
- * to init an empty repo. Returns 202; watch SSE for `project_created` /
- * `project_create_failed`, since a clone is slow.
+ * POST /api/projects — create a project, three ways:
+ *  - `repoUrl`                → clone an existing repo
+ *  - `name` + `visibility`    → create a new GitHub repo, then clone it
+ *  - `name` alone             → a local `git init` (fallback, no remote)
+ *
+ * Returns 202; watch SSE for `project_created` / `project_create_failed`.
  */
 export interface CreateProjectRequest {
   repoUrl?: string
   name?: string
+  visibility?: Visibility
 }
 
 export interface CreateProjectResponse {
   projectId: string
+}
+
+// --- GitHub integration, for the picker's clone/create forms ---------------
+
+/** A repo the user can clone, from `gh`. Owned repos are prioritized. */
+export interface GithubRepo {
+  nameWithOwner: string
+  owner: string
+  description?: string
+  private: boolean
+  url: string
+  cloneUrl: string
+  /** True when the authenticated user owns it — the picker sorts these first. */
+  isOwn: boolean
+}
+
+/** GET /api/github/repos?q= — clone suggestions, debounced on the client. */
+export interface GithubReposResponse {
+  repos: GithubRepo[]
+}
+
+/** GET /api/github/check-name?name= — is this name free to create? */
+export interface NameCheckResponse {
+  name: string
+  /** The GitHub account the repo would be created under. */
+  owner: string
+  available: boolean
+  /** Why not, when unavailable: 'exists-local' | 'exists-remote' | 'invalid'. */
+  reason?: string
 }
 
 /**

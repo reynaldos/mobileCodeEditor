@@ -50,6 +50,7 @@ async function boot(config: Config = DEV): Promise<{ base: string; log: EventLog
     log,
     sessions: new SessionManager(log, config, projects),
     projects,
+    github: undefined,
     pushStore,
     pusher: new Pusher(pushStore, config.vapid),
   })
@@ -206,6 +207,12 @@ test('prompting a real project without a token is a 503 that says what to do', a
 
   assert.equal(response.status, 503)
   assert.match(((await response.json()) as { error: string }).error, /CLAUDE_CODE_OAUTH_TOKEN/)
+})
+
+test('github routes 503 when gh is not configured (boot default)', async () => {
+  const { base } = await boot()
+  assert.equal((await fetch(`${base}/api/github/repos?q=x`)).status, 503)
+  assert.equal((await fetch(`${base}/api/github/check-name?name=x`)).status, 503)
 })
 
 test('GET /api/projects lists projects; POST creates one', async () => {
