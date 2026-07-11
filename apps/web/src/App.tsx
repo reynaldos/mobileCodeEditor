@@ -1,5 +1,5 @@
 import { LEGACY_THREAD_ID } from '@mce/protocol'
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { fetchHealth, type Health } from './api.ts'
 import { MessageList } from './components/MessageList.tsx'
 import { NotificationsButton } from './components/NotificationsButton.tsx'
@@ -12,7 +12,7 @@ import { useProjects } from './useProjects.ts'
 import { useThreads } from './useThreads.ts'
 
 const AGENT: Record<AgentState, { label: string; className: string }> = {
-  idle: { label: 'idle', className: 'text-muted' },
+  idle: { label: '', className: 'text-muted' },
   thinking: { label: 'working…', className: 'text-accent' },
   awaiting_approval: { label: 'needs you', className: 'text-warn' },
   awaiting_input: { label: 'ready', className: 'text-muted' },
@@ -32,10 +32,13 @@ export function App(): React.JSX.Element {
   const { state, connection } = useEventStream()
   const projectsState = useProjects()
   const { projects, activeId: activeProjectId } = projectsState
-  const { threads, activeThreadId, setActiveThreadId, refresh: refreshThreads } = useThreads(activeProjectId)
+  const { threads, refresh: refreshThreads } = useThreads(activeProjectId)
+  const [activeThreadId, setActiveThreadId] = useState<string | null>(null)
   const [health, setHealth] = useState<Health | undefined>()
   const [overlay, setOverlay] = useState<Overlay>(null)
   useKeyboardInset()
+
+  const startNewThread = useCallback(() => setActiveThreadId(crypto.randomUUID()), [])
 
   useEffect(() => {
     void fetchHealth().then(setHealth).catch(() => undefined)
@@ -47,14 +50,21 @@ export function App(): React.JSX.Element {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.created.length])
 
-  // Any new conversation activity → the thread list may have reordered / grown.
+  // Selecting (or restoring) a project starts a fresh thread by default; you
+  // reach previous threads through the history icon.
+  useEffect(() => {
+    if (activeProjectId) startNewThread()
+    else setActiveThreadId(null)
+  }, [activeProjectId, startNewThread])
+
+  // New conversation activity → the thread list may have reordered / grown.
   useEffect(() => {
     void refreshThreads()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.lastSeq])
 
   const activeThread = threads.find((t) => t.id === activeThreadId)
-  const isLegacy = activeThreadId === LEGACY_THREAD_ID || activeThread?.legacy === true
+  const isLegacy = activeThreadId === LEGACY_THREAD_ID
   const view = viewOf(state, activeThreadId)
   const agent = AGENT[view.agent]
   const projectName = projects.find((p) => p.id === activeProjectId)?.name
@@ -63,22 +73,23 @@ export function App(): React.JSX.Element {
     // `app` owns 100dvh and the keyboard inset. See styles.css.
     <div className="app flex flex-col">
       <header className="flex shrink-0 items-center justify-between gap-3 border-b border-line bg-panel px-3.5 pb-2.5 pt-[calc(10px+env(safe-area-inset-top,0px))]">
-        <button
-          className="flex min-w-0 items-center gap-1.5"
-          onClick={() => setOverlay(activeProjectId ? 'threads' : 'projects')}
-          title="Projects and threads"
-        >
+        <button className="flex min-w-0 items-center gap-1.5" onClick={() => setOverlay('projects')} title="Switch project">
           <span className="truncate font-semibold">{projectName ?? 'Projects'}</span>
-          {activeThread && <span className="shrink-0 text-muted">›</span>}
-          {activeThread && (
-            <span className="max-w-[40vw] truncate text-[13px] text-muted">
-              {activeThread.legacy ? 'Earlier' : activeThread.title}
-            </span>
-          )}
-          <span className={`shrink-0 text-xs ${agent.className}`}>{agent.label}</span>
+          <span className="shrink-0 text-muted">▾</span>
+          {agent.label && <span className={`shrink-0 text-xs ${agent.className}`}>{agent.label}</span>}
         </button>
 
         <div className="flex shrink-0 items-center gap-2.5">
+          {activeProjectId && (
+            <button
+              className="text-[17px] leading-none text-muted"
+              title="Previous threads"
+              aria-label="Previous threads"
+              onClick={() => setOverlay('threads')}
+            >
+              🕘
+            </button>
+          )}
           <NotificationsButton />
           <span className={`size-2 shrink-0 rounded-full ${CONNECTION[connection]}`} title={connection} />
         </div>
@@ -103,11 +114,9 @@ export function App(): React.JSX.Element {
         disabledReason={
           !activeProjectId
             ? 'Pick a project'
-            : !activeThreadId
-              ? 'Pick or start a thread'
-              : isLegacy
-                ? 'This is read-only — start a new thread to continue'
-                : undefined
+            : isLegacy
+              ? 'This is a previous conversation — start a new thread to continue'
+              : undefined
         }
       />
 
@@ -117,8 +126,8 @@ export function App(): React.JSX.Element {
           activeId={activeProjectId}
           failed={state.failed}
           onSelect={(id) => {
-            projectsState.setActiveId(id)
-            setOverlay('threads')
+            projectsState.setActiveId(id) // the effect above starts a fresh thread
+            setOverlay(null)
           }}
           onClose={() => setOverlay(null)}
         />
@@ -126,7 +135,6 @@ export function App(): React.JSX.Element {
 
       {overlay === 'threads' && activeProjectId && (
         <ThreadList
-          projectId={activeProjectId}
           projectName={projectName ?? activeProjectId}
           threads={threads}
           activeThreadId={activeThreadId}
@@ -134,12 +142,11 @@ export function App(): React.JSX.Element {
             setActiveThreadId(id)
             setOverlay(null)
           }}
-          onBack={() => setOverlay('projects')}
-          onCreated={(id) => {
-            void refreshThreads()
-            setActiveThreadId(id)
+          onNew={() => {
+            startNewThread()
             setOverlay(null)
           }}
+          onBack={() => setOverlay('projects')}
         />
       )}
     </div>

@@ -230,12 +230,13 @@ test('threads: new thread then list it', async () => {
   const { threadId } = (await created.json()) as { threadId: string }
 
   // A thread only appears once it has an event — seed one directly.
-  log.append({ sessionId: 's', projectId: 'app', threadId, ts: 1, type: 'user_prompt', text: 'title here' })
+  log.append({ sessionId: 's', projectId: 'app', threadId, ts: 1, type: 'user_prompt', text: 'add a title here' })
 
   const list = (await (await fetch(`${base}/api/projects/app/threads`)).json()) as { threads: Array<{ id: string; title: string }> }
   assert.equal(list.threads.length, 1)
   assert.equal(list.threads[0]?.id, threadId)
-  assert.equal(list.threads[0]?.title, 'title here')
+  // Titleized from the first prompt: sentence-cased, filler stripped.
+  assert.equal(list.threads[0]?.title, 'Add a title here')
 })
 
 test('github routes 503 when gh is not configured (boot default)', async () => {

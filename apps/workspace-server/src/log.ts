@@ -202,11 +202,11 @@ export class EventLog {
       )
       .all(projectId) as Array<{ id: string | null; lastActivity: number; messageCount: number }>
 
-    // Title (first prompt) is computed per group — cleaner than a correlated
-    // subquery once NULL thread_ids are in play.
+    // A concise title from the first prompt — computed per group, cleaner than a
+    // correlated subquery once NULL thread_ids are in play.
     return rows.map((r) => ({
       id: r.id,
-      title: this.#firstPromptOf(projectId, r.id) ?? '(no messages yet)',
+      title: titleize(this.#firstPromptOf(projectId, r.id)),
       lastActivity: r.lastActivity,
       messageCount: r.messageCount,
     }))
@@ -279,6 +279,22 @@ export class EventLog {
     }
     return row.n
   }
+}
+
+/**
+ * A short, title-like line from a thread's first prompt: one line, filler
+ * openers stripped, sentence-cased, capped. Not an LLM summary — a cheap,
+ * deterministic label good enough to tell threads apart.
+ */
+function titleize(firstPrompt: string | undefined): string {
+  if (!firstPrompt) return 'New thread'
+  let t = firstPrompt.replace(/\s+/g, ' ').trim()
+  // Drop polite/filler openers so the subject leads.
+  t = t.replace(/^(hey |hi |ok |okay |so |please |can you |could you |i want to |i'd like to |let's |lets |help me )/i, '')
+  t = t.replace(/[\s.,;:!?-]+$/, '')
+  if (!t) return 'New thread'
+  const title = t.length > 60 ? `${t.slice(0, 59)}…` : t
+  return title.charAt(0).toUpperCase() + title.slice(1)
 }
 
 function toEvent(row: Row): Event {
