@@ -4,7 +4,7 @@ import type { SessionManager } from '../session-manager.ts'
 
 /**
  * Answers a parked `AskUserQuestion` (Phase 2.7). The other half of the question
- * bridge in session.ts — resolves the `onUserDialog` promise the SDK is awaiting.
+ * bridge in session.ts — resolves the `canUseTool` promise the SDK is awaiting.
  */
 export function registerQuestions(app: FastifyInstance, sessions: SessionManager): void {
   app.post('/api/questions/:requestId', async (request, reply) => {

@@ -3,11 +3,20 @@
 Five enhancements captured for tracking. Each has: the ask, where the code stood, the approach
 taken (server / client / protocol), the decisions, and rough size.
 
-**Status — all five built + committed locally (typecheck + tests green).** Two things still need
-an on-device confirmation, both noted inline:
-- **#4** — verify the resolved identity in the boot log reads `reynaldos` (the fix logs it).
-- **#1** — confirm the real `AskUserQuestion` `dialogKind` from the `[dialog] kind=…` server log
-  and trim `QUESTION_DIALOG_KINDS` to it.
+**Status — all five built + committed locally (typecheck + tests green).**
+- **#4** — still needs an on-device confirmation: verify the resolved identity in the boot log
+  reads `reynaldos` (the fix logs it).
+- **#1** — **correction, found from the live bug report, not the spike.** The "spike result"
+  below was wrong: `AskUserQuestion` is **not** delivered via `onUserDialog`/`request_user_dialog`
+  in this SDK version. It arrives at `#canUseTool` exactly like every other tool call — confirmed
+  by the actual symptom in production, a plain approval card showing the raw `{ questions: [...] }`
+  JSON with only Approve/Reject, which is only reachable through the generic `#canUseTool` branch.
+  `onUserDialog` was never invoked, so the guessed `QUESTION_DIALOG_KINDS` were never exercised.
+  Fixed by special-casing `toolName === 'AskUserQuestion'` inside `#canUseTool` itself (parks a
+  `question_request` and resolves with a `PermissionResult` — `{ behavior: 'allow', updatedInput:
+  { ...input, answers } }` — instead of the `UserDialogResult` the old code assumed). The
+  `onUserDialog`/`supportedDialogKinds` wiring was removed as dead weight. See `session.ts`
+  `#canUseTool` / `#parkQuestion` and `session.test.ts`'s `AskUserQuestion …` tests.
 
 The build order below was followed; the original gameplan for each item is kept for the record.
 

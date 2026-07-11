@@ -1,12 +1,10 @@
 import { query } from '@anthropic-ai/claude-agent-sdk'
 import type {
   CanUseTool,
-  OnUserDialog,
   PermissionResult,
   Query,
   SDKMessage,
   SDKUserMessage,
-  UserDialogResult,
 } from '@anthropic-ai/claude-agent-sdk'
 import type { EventBody, NewEvent, Question, SessionStatus } from '@mce/protocol'
 import { randomUUID } from 'node:crypto'
@@ -30,15 +28,6 @@ import type { EventLog } from './log.ts'
  */
 const AUTO_APPROVED = new Set(['Read', 'Grep', 'Glob'])
 
-/**
- * `request_user_dialog` kinds we render as multiple-choice questions. The CLI
- * fails closed — it only emits a kind we've declared — and the exact string for
- * AskUserQuestion isn't pinned in the SDK types, so we declare the plausible
- * candidates and handle any whose payload actually carries `questions`. The
- * handler logs every kind it sees, so the real one is confirmed on first use.
- */
-const QUESTION_DIALOG_KINDS = ['ask_user_question', 'askUserQuestion', 'user_question', 'question', 'side_question']
-
 const SUMMARY_MAX = 200
 
 /** How long an idle session gets to return on its own before we abort it. */
@@ -50,6 +39,13 @@ export type QueryFn = typeof query
 interface Pending {
   readonly toolUseId: string
   readonly tool: string
+  readonly input: Record<string, unknown>
+  readonly resolve: (result: PermissionResult) => void
+}
+
+interface PendingQuestion {
+  readonly toolUseId: string
+  /** The original AskUserQuestion input, echoed back (with `answers` merged in) as `updatedInput`. */
   readonly input: Record<string, unknown>
   readonly resolve: (result: PermissionResult) => void
 }
@@ -90,7 +86,7 @@ export class AgentSession {
 
   readonly #queue = new AsyncQueue<SDKUserMessage>()
   readonly #pending = new Map<string, Pending>()
-  readonly #pendingQuestions = new Map<string, (result: UserDialogResult) => void>()
+  readonly #pendingQuestions = new Map<string, PendingQuestion>()
   readonly #abort = new AbortController()
 
   #query: Query | undefined
@@ -132,11 +128,11 @@ export class AgentSession {
       prompt: this.#queue,
       options: {
         cwd: this.#projectPath,
+        // AskUserQuestion arrives here too, as an ordinary tool_use — confirmed
+        // empirically (it was showing up as a JSON approval card before
+        // #canUseTool special-cased it below). There's no separate dialog
+        // channel for it in this SDK version.
         canUseTool: this.#canUseTool,
-        // Multiple-choice questions (AskUserQuestion) arrive here, not via
-        // canUseTool. We only receive the kinds we declare (fails closed).
-        onUserDialog: this.#onUserDialog,
-        supportedDialogKinds: QUESTION_DIALOG_KINDS,
         // 'default' is what makes canUseTool get consulted at all.
         permissionMode: 'default',
         // Load no user/project settings. A container should behave identically
@@ -225,11 +221,16 @@ export class AgentSession {
       this.#append({ type: 'approval_decision', approvalId, allow: false, reason: 'Server shutting down.' })
       pending.resolve({ behavior: 'deny', message: 'Server shutting down.', interrupt: true })
     }
-    // Same for parked questions — an unresolved dialog hangs the agent too.
-    for (const [requestId, resolve] of this.#pendingQuestions) {
+    // Same for parked questions — an unresolved AskUserQuestion hangs the agent too.
+    for (const [requestId, pending] of this.#pendingQuestions) {
       this.#pendingQuestions.delete(requestId)
       this.#append({ type: 'question_cancelled', requestId })
-      resolve({ behavior: 'cancelled' })
+      pending.resolve({
+        behavior: 'deny',
+        message: 'Server shutting down.',
+        interrupt: true,
+        toolUseID: pending.toolUseId,
+      })
     }
 
     if (!this.#query || !this.#done) return
@@ -272,6 +273,16 @@ export class AgentSession {
       return { behavior: 'allow', updatedInput: input, toolUseID: options.toolUseID }
     }
 
+    // AskUserQuestion arrives here like any other tool_use — there is no
+    // separate dialog channel for it in this SDK version (confirmed: without
+    // this branch it fell into the generic approval card below and rendered
+    // raw JSON with just Approve/Reject). Render the real picker instead and
+    // park until the phone answers, same bridge as an approval.
+    if (toolName === 'AskUserQuestion') {
+      const questions = extractQuestions(input)
+      if (questions) return this.#parkQuestion(questions, input, options)
+    }
+
     const approvalId = randomUUID()
 
     this.#append({
@@ -305,37 +316,34 @@ export class AgentSession {
   }
 
   /**
-   * The question bridge, parallel to the approval bridge but on the SDK's
-   * `onUserDialog` channel. AskUserQuestion arrives as a `request_user_dialog`;
-   * we surface it as a `question_request` event and park until an HTTP answer
-   * arrives. Anything that isn't a recognizable question is declined so the CLI
-   * applies its default.
+   * The question bridge: parallel to the approval bridge, on the same
+   * `canUseTool` channel. Surfaces `question_request` and parks a
+   * `PermissionResult` resolver until an HTTP answer arrives from the phone.
    */
-  readonly #onUserDialog: OnUserDialog = async (request, options) => {
-    const questions = extractQuestions(request.payload)
-    // Printed (not logged as an event) so the exact dialogKind for AskUserQuestion
-    // is confirmable on first use — the SDK types leave it an open string union.
-    console.error(`[dialog] kind=${request.dialogKind} handled=${questions ? 'yes' : 'no'}`)
-
-    if (!questions) return { behavior: 'cancelled' }
-
+  #parkQuestion(
+    questions: Question[],
+    input: Record<string, unknown>,
+    options: Parameters<CanUseTool>[2],
+  ): Promise<PermissionResult> {
     const requestId = randomUUID()
     this.#append({
       type: 'question_request',
       requestId,
-      ...(request.toolUseID ? { toolUseId: request.toolUseID } : {}),
+      toolUseId: options.toolUseID,
       questions,
     })
     this.#status = 'awaiting_approval'
 
-    return new Promise<UserDialogResult>((resolve) => {
-      this.#pendingQuestions.set(requestId, resolve)
+    return new Promise<PermissionResult>((resolve) => {
+      this.#pendingQuestions.set(requestId, { toolUseId: options.toolUseID, input, resolve })
+
+      // If the turn is aborted while we're parked, resolve rather than leak.
       options.signal.addEventListener(
         'abort',
         () => {
           if (!this.#pendingQuestions.delete(requestId)) return
           this.#append({ type: 'question_cancelled', requestId })
-          resolve({ behavior: 'cancelled' })
+          resolve({ behavior: 'deny', message: 'Aborted before you answered.', toolUseID: options.toolUseID })
         },
         { once: true },
       )
@@ -344,13 +352,17 @@ export class AgentSession {
 
   /** @returns false if this question was already answered, cancelled, or never existed. */
   answerQuestion(requestId: string, answers: Record<string, string>): boolean {
-    const resolve = this.#pendingQuestions.get(requestId)
-    if (!resolve) return false
+    const pending = this.#pendingQuestions.get(requestId)
+    if (!pending) return false
     this.#pendingQuestions.delete(requestId)
 
     this.#append({ type: 'question_answered', requestId, answers })
     if (this.#pendingQuestions.size === 0 && this.#pending.size === 0) this.#status = 'thinking'
-    resolve({ behavior: 'completed', result: { answers } })
+    // Allow the tool call to complete, with the answers folded into its input —
+    // AskUserQuestionOutput's own `answers` field is this exact shape (question
+    // text -> answer, multi-select comma-joined), so the tool's result reflects
+    // what the user picked.
+    pending.resolve({ behavior: 'allow', updatedInput: { ...pending.input, answers }, toolUseID: pending.toolUseId })
     return true
   }
 
@@ -491,12 +503,12 @@ function commandOf(input: Record<string, unknown>): string | undefined {
 }
 
 /**
- * Pull the questions array out of a `request_user_dialog` payload, if it looks
- * like an AskUserQuestion. Defensive: the per-kind payload shape is opaque in the
- * SDK types, so we validate structurally rather than trust the dialogKind.
+ * Pull the questions array out of an `AskUserQuestion` tool_use input.
+ * Defensive: validated structurally rather than trusted blindly, so a future
+ * SDK shape change degrades to a generic approval card instead of throwing.
  */
-function extractQuestions(payload: Record<string, unknown>): Question[] | undefined {
-  const raw = payload.questions
+function extractQuestions(input: Record<string, unknown>): Question[] | undefined {
+  const raw = input.questions
   if (!Array.isArray(raw) || raw.length === 0) return undefined
   const questions: Question[] = []
   for (const q of raw) {

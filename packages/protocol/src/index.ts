@@ -104,7 +104,8 @@ export type EventBody =
   | { type: 'thread_deleted' }
   /**
    * The agent asked a multiple-choice question (Phase 2.7 — the SDK's
-   * AskUserQuestion, delivered via onUserDialog). Blocks the turn until answered.
+   * AskUserQuestion, delivered like any other tool_use via canUseTool). Blocks
+   * the turn until answered.
    */
   | { type: 'question_request'; requestId: string; toolUseId?: string; questions: Question[] }
   /** The user answered; `answers` is keyed by question text (multi joined by ", "). */

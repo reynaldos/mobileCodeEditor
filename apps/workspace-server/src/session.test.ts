@@ -348,3 +348,132 @@ test('aborting while parked resolves the promise rather than leaking it', async 
   assert.ok(types(log).includes('approval_expired'))
   await session.stop()
 })
+
+// ---------------------------------------------------------------------------
+// AskUserQuestion arrives via canUseTool like any other tool_use (confirmed:
+// without a special case it fell into the generic approval branch and showed
+// raw JSON with just Approve/Reject — no picker). These lock that in.
+
+const QUESTION_INPUT = {
+  questions: [
+    {
+      question: 'Which library should we use for date formatting?',
+      header: 'Library',
+      options: [
+        { label: 'date-fns', description: 'Tree-shakeable, no prototype patching.' },
+        { label: 'dayjs', description: 'Tiny, moment-compatible API.' },
+      ],
+      multiSelect: false,
+    },
+  ],
+}
+
+test('AskUserQuestion renders as a question_request, not a generic approval', async () => {
+  const seen = capture()
+  const { session, log } = makeSession(
+    fakeQuery(async function* ({ prompt, options }) {
+      yield init()
+      for await (const _ of prompt) {
+        seen.verdict = await options.canUseTool!('AskUserQuestion', QUESTION_INPUT, {
+          toolUseID: 'tu1',
+          signal: new AbortController().signal,
+        })
+        yield done()
+      }
+    }),
+  )
+
+  session.start()
+  session.prompt('go')
+  await waitFor(() => session.status === 'awaiting_approval', 'the question card')
+
+  // The agent is genuinely blocked: canUseTool has not returned yet. Snapshot
+  // locally — asserting on `seen.verdict` directly narrows the property to
+  // `null` for the rest of the function (see the Edit test above).
+  const beforeAnswer = seen.verdict
+  assert.ok(beforeAnswer === null, 'canUseTool must not have returned yet')
+  assert.ok(types(log).includes('question_request'))
+  assert.ok(!types(log).includes('approval_request'), 'must not also raise a generic approval card')
+
+  const request = log.replaySince(0).find((e) => e.type === 'question_request')
+  assert.ok(request?.type === 'question_request')
+  assert.equal(request.toolUseId, 'tu1')
+  assert.deepEqual(request.questions, QUESTION_INPUT.questions)
+
+  const requestId = request.requestId
+  assert.ok(session.hasPendingQuestion(requestId))
+
+  assert.equal(session.answerQuestion(requestId, { [QUESTION_INPUT.questions[0]!.question]: 'date-fns' }), true)
+  await waitFor(() => session.status === 'awaiting_input', 'the turn to resume')
+
+  const verdict = seen.verdict
+  assert.ok(verdict)
+  assert.equal(verdict.behavior, 'allow')
+  // The answer rides back on updatedInput so the tool_result reflects the pick.
+  const updated = verdict.behavior === 'allow' ? (verdict.updatedInput as { answers?: Record<string, string> }) : undefined
+  assert.deepEqual(updated?.answers, { [QUESTION_INPUT.questions[0]!.question]: 'date-fns' })
+
+  assert.ok(types(log).includes('question_answered'))
+  await session.stop()
+})
+
+test('answering an AskUserQuestion that is not pending returns false', async () => {
+  const { session } = makeSession(fakeQuery(async function* () { yield init() }))
+  session.start()
+  assert.equal(session.answerQuestion('ghost', {}), false)
+  await session.stop()
+})
+
+test('aborting a parked AskUserQuestion resolves rather than leaking it', async () => {
+  const abort = new AbortController()
+  const seen = capture()
+
+  const { session, log } = makeSession(
+    fakeQuery(async function* ({ prompt, options }) {
+      yield init()
+      for await (const _ of prompt) {
+        seen.verdict = await options.canUseTool!('AskUserQuestion', QUESTION_INPUT, {
+          toolUseID: 'tu1',
+          signal: abort.signal,
+        })
+        yield done()
+      }
+    }),
+  )
+
+  session.start()
+  session.prompt('go')
+  await waitFor(() => session.status === 'awaiting_approval', 'the question card')
+
+  abort.abort()
+  await waitFor(() => seen.verdict !== null, 'the parked promise to resolve')
+
+  assert.equal(seen.verdict?.behavior, 'deny')
+  assert.ok(types(log).includes('question_cancelled'))
+  await session.stop()
+})
+
+test('a malformed AskUserQuestion input falls back to a generic approval card', async () => {
+  const { session, log } = makeSession(
+    fakeQuery(async function* ({ prompt, options }) {
+      yield init()
+      for await (const _ of prompt) {
+        // Never resolved in this test — parks like the other approval tests,
+        // which is why the loop never reaches `yield done()`.
+        await options.canUseTool!('AskUserQuestion', { not: 'a question' }, {
+          toolUseID: 'tu1',
+          signal: new AbortController().signal,
+        })
+        yield done()
+      }
+    }),
+  )
+
+  session.start()
+  session.prompt('go')
+  await waitFor(() => session.status === 'awaiting_approval', 'the approval card')
+
+  assert.ok(types(log).includes('approval_request'))
+  assert.ok(!types(log).includes('question_request'))
+  await session.stop()
+})
