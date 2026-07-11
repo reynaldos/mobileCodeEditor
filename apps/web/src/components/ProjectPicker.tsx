@@ -1,6 +1,6 @@
 import type { GithubRepo, NameCheckResponse, Visibility } from '@mce/protocol'
 import type { Project } from '@mce/protocol'
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { ApiError, checkProjectName, createProject, fetchGithubRepos } from '../api.ts'
 import { useDebounced } from '../useDebounced.ts'
 
@@ -53,7 +53,7 @@ export function ProjectPicker({ projects, activeId, failed, onSelect, onClose }:
           )}
         </ul>
 
-        <AddProject failed={failed} />
+        <AddProject projects={projects} failed={failed} />
       </div>
     </div>
   )
@@ -63,7 +63,7 @@ type Mode = 'clone' | 'create'
 
 const TAB = 'flex-1 rounded-lg border py-2 text-[13px] font-medium'
 
-function AddProject({ failed }: { failed: Record<string, string> }): React.JSX.Element {
+function AddProject({ projects, failed }: { projects: Project[]; failed: Record<string, string> }): React.JSX.Element {
   const [mode, setMode] = useState<Mode>('clone')
 
   return (
@@ -83,42 +83,80 @@ function AddProject({ failed }: { failed: Record<string, string> }): React.JSX.E
         </button>
       </div>
 
-      {mode === 'clone' ? <CloneForm failed={failed} /> : <CreateForm failed={failed} />}
+      {mode === 'clone' ? <CloneForm projects={projects} failed={failed} /> : <CreateForm failed={failed} />}
     </div>
   )
+}
+
+/** owner/repo, lowercased, no `.git` — for matching a project's remote to a repo. */
+function repoKey(url: string): string {
+  return url
+    .replace(/\.git$/i, '')
+    .replace(/\/+$/, '')
+    .split(/[/:]/)
+    .slice(-2)
+    .join('/')
+    .toLowerCase()
 }
 
 const INPUT =
   'min-h-11 w-full rounded-xl border border-line bg-panel-2 px-3 text-[16px] text-fg outline-none focus:border-accent'
 
+const isGitUrl = (s: string): boolean => /^(https?:\/\/|git@|ssh:\/\/)/.test(s)
+
 /**
- * Type to search your repos (owned first) or paste any git URL. A clone returns
- * 202; the project appears in the list above when its `project_created` lands.
+ * Type to search your repos (owned first), tap the chevron to browse the ones you
+ * haven't added yet, or paste any git URL. A clone returns 202; the project
+ * appears in the list above when its `project_created` lands.
  */
-function CloneForm({ failed }: { failed: Record<string, string> }): React.JSX.Element {
+function CloneForm({ projects, failed }: { projects: Project[]; failed: Record<string, string> }): React.JSX.Element {
   const [query, setQuery] = useState('')
   const [repos, setRepos] = useState<GithubRepo[]>([])
+  const [browsing, setBrowsing] = useState(false)
+  const [loading, setLoading] = useState(false)
   const [pending, setPending] = useState<string | undefined>()
   const [error, setError] = useState<string | undefined>()
   const debounced = useDebounced(query, 300)
 
+  // Repos already cloned as projects, by owner/repo and by id — so browse and
+  // search only ever offer things you don't have yet.
+  const added = useMemo(() => {
+    const s = new Set<string>()
+    for (const p of projects) {
+      s.add(p.id.toLowerCase())
+      if (p.repoUrl) s.add(repoKey(p.repoUrl))
+    }
+    return s
+  }, [projects])
+  const isAdded = (r: GithubRepo): boolean =>
+    added.has(r.nameWithOwner.toLowerCase()) || added.has((r.nameWithOwner.split('/')[1] ?? '').toLowerCase())
+
+  // One effect drives suggestions: a typed query searches; an open chevron with
+  // no query browses everything; a pasted URL shows nothing.
   useEffect(() => {
     let cancelled = false
     const q = debounced.trim()
-    // A pasted URL isn't a search — no suggestions for it.
-    if (!q || /^(https?:\/\/|git@|ssh:\/\/)/.test(q)) {
+    if (isGitUrl(q)) {
       setRepos([])
       return
     }
+    if (!q && !browsing) {
+      setRepos([])
+      return
+    }
+    setLoading(true)
     void fetchGithubRepos(q)
       .then((r) => !cancelled && setRepos(r))
       .catch(() => !cancelled && setRepos([]))
+      .finally(() => !cancelled && setLoading(false))
     return () => {
       cancelled = true
     }
-  }, [debounced])
+  }, [debounced, browsing])
 
   const pendingError = pending ? failed[pending] : undefined
+  const suggestions = repos.filter((r) => !isAdded(r))
+  const isUrl = isGitUrl(query.trim())
 
   async function clone(repoUrl: string): Promise<void> {
     setError(undefined)
@@ -127,12 +165,11 @@ function CloneForm({ failed }: { failed: Record<string, string> }): React.JSX.El
       setPending(projectId)
       setQuery('')
       setRepos([])
+      setBrowsing(false)
     } catch (err) {
       setError(err instanceof ApiError ? err.message : String(err))
     }
   }
-
-  const isUrl = /^(https?:\/\/|git@|ssh:\/\/)/.test(query.trim())
 
   return (
     <div>
@@ -144,19 +181,29 @@ function CloneForm({ failed }: { failed: Record<string, string> }): React.JSX.El
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && isUrl && void clone(query.trim())}
         />
-        {isUrl && (
+        {isUrl ? (
           <button
             className="min-h-11 shrink-0 rounded-xl border border-accent bg-accent px-4 font-semibold text-[#06101f]"
             onClick={() => void clone(query.trim())}
           >
             Clone
           </button>
+        ) : (
+          // Browse the repos you haven't added yet.
+          <button
+            className="min-h-11 w-11 shrink-0 rounded-xl border border-line bg-panel-2 text-muted"
+            title="Browse your repos"
+            aria-label="Browse your repos"
+            onClick={() => setBrowsing((b) => !b)}
+          >
+            <span className={`inline-block transition-transform ${browsing ? 'rotate-180' : ''}`}>▾</span>
+          </button>
         )}
       </div>
 
-      {repos.length > 0 && (
+      {suggestions.length > 0 && (
         <ul className="mt-2 flex flex-col gap-1">
-          {repos.map((r) => (
+          {suggestions.map((r) => (
             <li key={r.nameWithOwner}>
               <button
                 className="flex w-full items-center justify-between rounded-lg border border-line bg-panel-2 px-3 py-2 text-left"
@@ -173,6 +220,13 @@ function CloneForm({ failed }: { failed: Record<string, string> }): React.JSX.El
             </li>
           ))}
         </ul>
+      )}
+
+      {loading && suggestions.length === 0 && <p className="mt-2 text-[13px] text-muted">loading…</p>}
+      {browsing && !loading && suggestions.length === 0 && (
+        <p className="mt-2 text-[13px] text-muted">
+          {repos.length === 0 ? 'No repos found (is GitHub configured?).' : 'You&rsquo;ve already added your recent repos — search for more.'}
+        </p>
       )}
 
       {pending && !pendingError && <p className="mt-2 text-[13px] text-accent">Cloning {pending}…</p>}
