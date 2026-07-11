@@ -1,4 +1,4 @@
-import { Camera, Image as ImageIcon, X } from 'lucide-react'
+import { ArrowUp, Plus, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { sendPrompt, uploadImages } from '../api.ts'
 
@@ -33,8 +33,8 @@ export function PromptBox({
   const [error, setError] = useState<string | undefined>()
   const ready = Boolean(projectId && threadId && !disabledReason)
 
-  const cameraRef = useRef<HTMLInputElement>(null)
   const libraryRef = useRef<HTMLInputElement>(null)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   // Cleanup reads the LATEST images, not whatever was captured when the effect
   // was set up — a plain empty-deps effect would otherwise revoke only the
@@ -47,6 +47,17 @@ export function PromptBox({
     },
     [],
   )
+
+  // Driven off `text` rather than the DOM `input` event so it also fires when
+  // `text` is cleared programmatically (e.g. after send) — an `onInput`
+  // handler only sees real user keystrokes and would leave the box stuck at
+  // its last-grown height after a submit.
+  useEffect(() => {
+    const el = textareaRef.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = `${Math.min(el.scrollHeight, 160)}px`
+  }, [text])
 
   const uploading = images.some((i) => i.status === 'uploading')
 
@@ -158,18 +169,7 @@ export function PromptBox({
         </div>
       )}
 
-      <div className="flex items-end gap-2">
-        <input
-          ref={cameraRef}
-          type="file"
-          accept="image/*"
-          capture="environment"
-          className="hidden"
-          onChange={(e) => {
-            handleFiles([...(e.target.files ?? [])])
-            e.target.value = ''
-          }}
-        />
+      <div className="flex items-end gap-1 rounded-3xl border border-line bg-panel-2 py-1.5 pr-1.5 pl-1 focus-within:border-accent">
         <input
           ref={libraryRef}
           type="file"
@@ -183,35 +183,22 @@ export function PromptBox({
         />
         <button
           type="button"
-          aria-label="Take a photo"
-          disabled={!ready}
-          onClick={() => cameraRef.current?.click()}
-          className="grid size-11 shrink-0 place-items-center rounded-xl border border-line bg-panel-2 text-muted disabled:opacity-50"
-        >
-          <Camera size={18} />
-        </button>
-        <button
-          type="button"
           aria-label="Add a photo"
           disabled={!ready}
           onClick={() => libraryRef.current?.click()}
-          className="grid size-11 shrink-0 place-items-center rounded-xl border border-line bg-panel-2 text-muted disabled:opacity-50"
+          className="grid size-9 shrink-0 place-items-center rounded-full text-muted disabled:opacity-50"
         >
-          <ImageIcon size={18} />
+          <Plus size={18} />
         </button>
         <textarea
-          className="prompt-input max-h-40 min-h-11 flex-1 resize-none rounded-xl border border-line bg-panel-2 px-3 py-2.5 text-fg outline-none focus:border-accent"
+          ref={textareaRef}
+          className="prompt-input max-h-40 min-h-9 flex-1 resize-none bg-transparent px-1 py-1.5 text-fg outline-none"
           value={text}
           rows={1}
           disabled={!ready}
           placeholder={ready ? 'What should Claude do?' : (disabledReason ?? 'Pick a project and thread')}
           // Enter inserts a newline on a phone keyboard. Sending is a button.
           onChange={(e) => setText(e.target.value)}
-          onInput={(e) => {
-            const el = e.currentTarget
-            el.style.height = 'auto'
-            el.style.height = `${Math.min(el.scrollHeight, 160)}px`
-          }}
           onPaste={(e) => {
             // Does NOT preventDefault — a plain text paste must still work.
             const files = [...e.clipboardData.items]
@@ -222,11 +209,12 @@ export function PromptBox({
           }}
         />
         <button
-          className="min-h-11 w-18 shrink-0 rounded-xl border border-accent bg-accent font-semibold text-[#06101f] disabled:opacity-50"
+          aria-label="Send"
+          className="grid size-9 shrink-0 place-items-center rounded-full bg-accent text-[#06101f] disabled:opacity-50"
           disabled={sending || (!text.trim() && images.length === 0) || !ready || uploading}
           onClick={() => void submit()}
         >
-          {sending ? '…' : 'Send'}
+          {sending ? '…' : <ArrowUp size={18} />}
         </button>
       </div>
     </div>
