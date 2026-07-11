@@ -21,6 +21,7 @@ const CONFIG: Config = {
   dbPath: ':memory:',
   projectPath: tmpdir(),
   projectId: 'test',
+  projectsRoot: tmpdir(),
   claudeToken: 'test-token',
   model: undefined,
   isDev: true,

@@ -26,6 +26,7 @@ const DEV: Config = {
   dbPath: ':memory:',
   projectPath: tmpdir(),
   projectId: 'test',
+  projectsRoot: tmpdir(),
   claudeToken: undefined,
   model: undefined,
   isDev: true,

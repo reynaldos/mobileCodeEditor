@@ -6,15 +6,17 @@
  * change to this file rather than a hunt. See DECISIONS #14.
  */
 import { statSync } from 'node:fs'
-import { basename, resolve } from 'node:path'
+import { basename, dirname, resolve } from 'node:path'
 
 export interface Config {
   readonly port: number
   readonly host: string
   readonly dbPath: string
-  /** Absolute path to the one project. A project is a directory; a picker is a feature. */
+  /** The seed project, cloned on first boot. Still the default when no other exists. */
   readonly projectPath: string
   readonly projectId: string
+  /** Parent of the projects (Phase 2). Every project is a directory under here. */
+  readonly projectsRoot: string
   /** Absent is legal — the log, SSE, and debug injector all work without it. */
   readonly claudeToken: string | undefined
   readonly model: string | undefined
@@ -58,6 +60,7 @@ export function loadConfig(): Config {
     dbPath: resolve(process.env.DB_PATH ?? './data/events.db'),
     projectPath,
     projectId: basename(projectPath),
+    projectsRoot: resolve(process.env.PROJECTS_ROOT ?? dirname(projectPath)),
     // Deliberately not required at boot. You can build and verify the whole SSE
     // and replay path before the agent exists — that's the Block 2 gate.
     claudeToken: process.env.CLAUDE_CODE_OAUTH_TOKEN?.trim() || undefined,

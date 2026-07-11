@@ -174,6 +174,18 @@ export class EventLog {
     return row?.id ?? undefined
   }
 
+  /** Project-creation events, for the picker's "created how / when". */
+  projectCreations(): Array<{ name: string; repoUrl?: string; ts: number }> {
+    return this.#db
+      .prepare(
+        `SELECT project_id AS name,
+                json_extract(payload, '$.repoUrl') AS repoUrl,
+                ts
+           FROM events WHERE type = 'project_created' ORDER BY seq ASC`,
+      )
+      .all() as Array<{ name: string; repoUrl?: string; ts: number }>
+  }
+
   countOfType(type: EventType): number {
     const row = this.#db.prepare(`SELECT COUNT(*) AS n FROM events WHERE type = ?`).get(type) as {
       n: number
