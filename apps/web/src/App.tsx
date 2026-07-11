@@ -86,11 +86,14 @@ export function App(): React.JSX.Element {
     // `app` owns 100dvh and the keyboard inset. See styles.css.
     <div className="app flex flex-col">
       <header className="flex shrink-0 items-center justify-between gap-3 border-b border-line bg-panel px-3.5 pb-2.5 pt-[calc(10px+env(safe-area-inset-top,0px))]">
-        <button className="flex min-w-0 items-center gap-1.5" onClick={() => setOverlay('projects')} title="Switch project">
-          <span className="truncate font-semibold">{projectName ?? 'Projects'}</span>
-          <ChevronDown className="size-4 shrink-0 text-muted" />
-          {agent.label && <span className={`shrink-0 text-xs ${agent.className}`}>{agent.label}</span>}
-        </button>
+        <div className="flex min-w-0 items-center gap-2.5">
+          <span className={`size-2 shrink-0 rounded-full ${CONNECTION[connection]}`} title={connection} />
+          <button className="flex min-w-0 items-center gap-1.5" onClick={() => setOverlay('projects')} title="Switch project">
+            <span className="truncate font-semibold">{projectName ?? 'Projects'}</span>
+            <ChevronDown className="size-4 shrink-0 text-muted" />
+            {agent.label && <span className={`shrink-0 text-xs ${agent.className}`}>{agent.label}</span>}
+          </button>
+        </div>
 
         <div className="flex shrink-0 items-center gap-2.5">
           {activeProjectId && (
@@ -117,7 +120,6 @@ export function App(): React.JSX.Element {
             </>
           )}
           <NotificationsButton />
-          <span className={`size-2 shrink-0 rounded-full ${CONNECTION[connection]}`} title={connection} />
         </div>
       </header>
 
