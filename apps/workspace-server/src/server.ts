@@ -4,12 +4,14 @@ import Fastify, { type FastifyInstance } from 'fastify'
 import { existsSync } from 'node:fs'
 import type { Config } from './config.ts'
 import type { EventLog } from './log.ts'
+import type { ProjectStore } from './projects.ts'
 import type { Pusher } from './push.ts'
 import type { PushStore } from './push-store.ts'
 import { registerApprovals } from './routes/approvals.ts'
 import { registerConversations } from './routes/conversations.ts'
 import { registerDebug } from './routes/debug.ts'
 import { registerEvents } from './routes/events.ts'
+import { registerProjects } from './routes/projects.ts'
 import { registerPrompt } from './routes/prompt.ts'
 import { registerPush } from './routes/push.ts'
 import type { SessionManager } from './session-manager.ts'
@@ -17,12 +19,13 @@ import type { SessionManager } from './session-manager.ts'
 export interface Services {
   log: EventLog
   sessions: SessionManager
+  projects: ProjectStore
   pushStore: PushStore
   pusher: Pusher
 }
 
 export async function buildServer(config: Config, services: Services): Promise<FastifyInstance> {
-  const { log, sessions, pushStore, pusher } = services
+  const { log, sessions, projects, pushStore, pusher } = services
   const app = Fastify({
     logger: config.isDev
       ? { transport: { target: 'pino-pretty', options: { translateTime: 'HH:MM:ss' } } }
@@ -48,6 +51,7 @@ export async function buildServer(config: Config, services: Services): Promise<F
   }))
 
   registerEvents(app, log, config)
+  registerProjects(app, projects)
   registerPrompt(app, sessions)
   registerApprovals(app, sessions)
   registerConversations(app, sessions)

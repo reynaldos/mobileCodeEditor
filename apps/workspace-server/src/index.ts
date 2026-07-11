@@ -3,6 +3,7 @@ import { openDb } from './db.ts'
 import { acquireLock } from './lock.ts'
 import { EventLog } from './log.ts'
 import { Notifier } from './notifier.ts'
+import { ProjectStore } from './projects.ts'
 import { Pusher } from './push.ts'
 import { PushStore } from './push-store.ts'
 import { makeRedactor } from './redact.ts'
@@ -18,6 +19,7 @@ const lock = await acquireLock(`${config.dbPath}.lock`)
 
 const db = openDb(config.dbPath)
 const log = new EventLog(db, makeRedactor(secretsOf(config)))
+const projects = new ProjectStore(config.projectsRoot, log)
 const sessions = new SessionManager(log, config)
 const pushStore = new PushStore(db)
 const pusher = new Pusher(pushStore, config.vapid)
@@ -29,7 +31,7 @@ sessions.recoverOnBoot()
 const notifier = new Notifier(log, pusher)
 notifier.start()
 
-const app = await buildServer(config, { log, sessions, pushStore, pusher })
+const app = await buildServer(config, { log, sessions, projects, pushStore, pusher })
 
 await app.listen({ port: config.port, host: config.host })
 app.log.info(

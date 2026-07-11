@@ -6,6 +6,7 @@ import { after, test } from 'node:test'
 import type { Config } from './config.ts'
 import { openDb } from './db.ts'
 import { EventLog } from './log.ts'
+import { ProjectStore } from './projects.ts'
 import { Pusher } from './push.ts'
 import { PushStore } from './push-store.ts'
 import { makeRedactor } from './redact.ts'
@@ -46,6 +47,7 @@ async function boot(config: Config = DEV): Promise<{ base: string; log: EventLog
   const app = await buildServer(config, {
     log,
     sessions: new SessionManager(log, config),
+    projects: new ProjectStore(config.projectsRoot, log),
     pushStore,
     pusher: new Pusher(pushStore, config.vapid),
   })
