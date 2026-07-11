@@ -5,10 +5,13 @@ import type {
   GithubRepo,
   GithubReposResponse,
   NameCheckResponse,
+  NewThreadResponse,
   Project,
   ProjectsResponse,
   PromptRequest,
   PromptResponse,
+  Thread,
+  ThreadsResponse,
 } from '@mce/protocol'
 
 /**
@@ -49,20 +52,21 @@ async function post<T>(path: string, body: unknown): Promise<T | undefined> {
 }
 
 /** 202. The answer arrives over SSE, not in this response. */
-export async function sendPrompt(text: string, projectId: string, fresh?: boolean): Promise<PromptResponse> {
-  return (await post<PromptResponse>('/api/prompt', {
-    text,
-    projectId,
-    ...(fresh ? { fresh } : {}),
-  } satisfies PromptRequest))!
+export async function sendPrompt(text: string, projectId: string, threadId: string): Promise<PromptResponse> {
+  return (await post<PromptResponse>('/api/prompt', { text, projectId, threadId } satisfies PromptRequest))!
 }
 
-/**
- * Ends the project's live session and draws a line in the log. The next prompt
- * to it starts a conversation Claude has no memory of.
- */
-export async function startNewConversation(projectId: string): Promise<void> {
-  await post<void>('/api/conversations/new', { projectId })
+/** The project's threads, newest activity first. */
+export async function fetchThreads(projectId: string): Promise<Thread[]> {
+  const response = await fetch(`${BASE}/api/projects/${encodeURIComponent(projectId)}/threads`)
+  if (!response.ok) throw new ApiError(response.status, response.statusText)
+  return ((await response.json()) as ThreadsResponse).threads
+}
+
+/** Mint a fresh thread; returns its id. */
+export async function createThread(projectId: string): Promise<string> {
+  const res = await post<NewThreadResponse>(`/api/projects/${encodeURIComponent(projectId)}/threads`, {})
+  return res!.threadId
 }
 
 /** The projects the picker shows. Authoritative — the server reads disk. */

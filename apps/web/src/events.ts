@@ -1,13 +1,13 @@
-import type { Event } from '@mce/protocol'
+import { LEGACY_THREAD_ID, type Event } from '@mce/protocol'
 
 /**
- * A reducer over the event union. Events in, renderable per-project views out.
+ * A reducer over the event union. Events in, renderable per-thread views out.
  *
  * The client is a view over a log with a cursor, not a WebSocket peer — that is
- * why backgrounding the phone is a no-op. Phase 2: the log is one global stream
- * keyed by `project_id`, so the reducer keeps a view *per project* and the UI
- * renders the active one. Switching projects is instant (no refetch), and the
- * SSE route stays untouched.
+ * why backgrounding the phone is a no-op. Phase 2.5: the log is one global stream
+ * keyed by `thread_id`, so the reducer keeps a view *per thread* and the UI
+ * renders the active one. Switching is instant (no refetch), and the SSE route
+ * stays untouched. Legacy events (no threadId) collect under `LEGACY_THREAD_ID`.
  */
 
 export type Item =
@@ -58,8 +58,8 @@ export const emptyProjectState: ProjectState = {
 
 export interface State {
   lastSeq: number
-  /** Per-project conversation views, keyed by projectId. */
-  byProject: Record<string, ProjectState>
+  /** Per-thread conversation views, keyed by threadId (legacy → LEGACY_THREAD_ID). */
+  byThread: Record<string, ProjectState>
   /**
    * Signals for the picker: names of projects created / failed. The authoritative
    * list is GET /api/projects (it reads disk); these just say "refetch" / "show
@@ -71,15 +71,15 @@ export interface State {
 
 export const initialState: State = {
   lastSeq: 0,
-  byProject: {},
+  byThread: {},
   created: [],
   failed: {},
 }
 
-/** The view for a project, or an empty one if it has no events yet. */
-export function viewOf(state: State, projectId: string | null): ProjectState {
-  if (!projectId) return emptyProjectState
-  return state.byProject[projectId] ?? emptyProjectState
+/** The view for a thread, or an empty one if it has no events yet. */
+export function viewOf(state: State, threadId: string | null): ProjectState {
+  if (!threadId) return emptyProjectState
+  return state.byThread[threadId] ?? emptyProjectState
 }
 
 export function reduce(state: State, event: Event): State {
@@ -96,11 +96,13 @@ export function reduce(state: State, event: Event): State {
     return { ...base, failed: { ...state.failed, [event.name]: event.error } }
   }
 
-  // Everything else is a conversation event: route it to its project's view.
-  const view = state.byProject[event.projectId] ?? emptyProjectState
+  // Every other event belongs to a thread. Legacy events (no threadId) collect
+  // under the sentinel bucket so the "Earlier conversation" thread can show them.
+  const threadId = event.threadId ?? LEGACY_THREAD_ID
+  const view = state.byThread[threadId] ?? emptyProjectState
   const next = reduceProject(view, event)
   if (next === view) return base
-  return { ...base, byProject: { ...state.byProject, [event.projectId]: next } }
+  return { ...base, byThread: { ...state.byThread, [threadId]: next } }
 }
 
 /** Replaces one item without mutating the array. */

@@ -39,7 +39,7 @@ export function ProjectPicker({ projects, activeId, failed, onSelect, onClose }:
               >
                 <div className="flex items-center justify-between">
                   <span className="truncate font-medium">{p.name}</span>
-                  {p.id === activeId && <span className="text-[11px] text-accent">active</span>}
+                  <span className="text-[11px] text-muted">threads ›</span>
                 </div>
                 <div className="mt-0.5 truncate text-[12px] text-muted">
                   {p.repoUrl ?? 'local'} {p.branch ? `· ${p.branch}` : ''}

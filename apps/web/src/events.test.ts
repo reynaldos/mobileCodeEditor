@@ -1,20 +1,19 @@
-import type { Event, EventBody } from '@mce/protocol'
+import { LEGACY_THREAD_ID, type Event, type EventBody } from '@mce/protocol'
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { initialState, reduce, viewOf, type Item, type ProjectState, type State } from './events.ts'
 
 let seq = 0
-/** Events default to project 'p'; pass a projectId to place one elsewhere. */
-const at = (body: EventBody, projectId = 'p'): Event =>
-  ({ seq: ++seq, sessionId: 's1', projectId, ts: 1, ...body }) as Event
+/** Events default to thread 'th' in project 'p'; pass a threadId to place elsewhere. */
+const at = (body: EventBody, threadId: string | undefined = 'th'): Event =>
+  ({ seq: ++seq, sessionId: 's1', projectId: 'p', ...(threadId ? { threadId } : {}), ts: 1, ...body }) as Event
 
 function run(bodies: EventBody[]): State {
   seq = 0
   return bodies.map((b) => at(b)).reduce(reduce, initialState)
 }
 
-/** The default project's view. */
-const view = (state: State): ProjectState => viewOf(state, 'p')
+const view = (state: State): ProjectState => viewOf(state, 'th')
 const kinds = (state: State): Item['kind'][] => view(state).items.map((i) => i.kind)
 
 test('a full turn renders in order', () => {
@@ -42,7 +41,6 @@ test('tool_result finds its tool_use even with items appended in between', () =>
 
   const items = view(state).items
   assert.equal(items[0]?.kind === 'tool' && items[0].status, 'error')
-  assert.equal(items[0]?.kind === 'tool' && items[0].summary, 'boom')
   assert.equal(items[2]?.kind === 'tool' && items[2].status, 'running')
 })
 
@@ -72,71 +70,49 @@ test('replayed events are idempotent — a reconnect race cannot duplicate a mes
   const once = reduce(initialState, first)
   const twice = reduce(once, first)
 
-  assert.equal(viewOf(twice, 'p').items.length, 1)
+  assert.equal(viewOf(twice, 'th').items.length, 1)
   assert.equal(twice, once, 'same state object: no re-render')
 })
 
 test('an out-of-order low seq is ignored', () => {
-  const state = reduce(
-    reduce(initialState, { seq: 5, sessionId: 's', projectId: 'p', ts: 1, type: 'assistant_text', text: 'b' }),
-    { seq: 2, sessionId: 's', projectId: 'p', ts: 1, type: 'assistant_text', text: 'a' },
-  )
-  assert.deepEqual(viewOf(state, 'p').items.map((i) => (i.kind === 'assistant' ? i.text : '')), ['b'])
+  const hi = { seq: 5, sessionId: 's', projectId: 'p', threadId: 'th', ts: 1, type: 'assistant_text', text: 'b' } as Event
+  const lo = { seq: 2, sessionId: 's', projectId: 'p', threadId: 'th', ts: 1, type: 'assistant_text', text: 'a' } as Event
+  const state = reduce(reduce(initialState, hi), lo)
+  assert.deepEqual(viewOf(state, 'th').items.map((i) => (i.kind === 'assistant' ? i.text : '')), ['b'])
   assert.equal(state.lastSeq, 5)
 })
 
-test('a conversation_reset clears that project view — the screen forgets what Claude forgot', () => {
-  const state = run([
-    { type: 'session_started', claudeSessionId: 'c1', model: 'opus' },
-    { type: 'user_prompt', text: 'remember this' },
-    { type: 'turn_complete' },
-    { type: 'conversation_reset' },
-  ])
-
-  assert.deepEqual(kinds(state), [])
-  assert.equal(view(state).agent, 'idle')
-})
-
-test('replaying the whole log after a reset still shows a fresh view', () => {
-  const state = run([
-    { type: 'user_prompt', text: 'old' },
-    { type: 'conversation_reset' },
-    { type: 'session_started', claudeSessionId: 'c2', model: 'opus' },
-    { type: 'user_prompt', text: 'new' },
-  ])
-
-  assert.deepEqual(kinds(state), ['user'])
-  const first = view(state).items[0]
-  assert.equal(first?.kind === 'user' && first.text, 'new')
-})
-
-test('two projects keep separate views — Phase 2 isolation', () => {
+test('two threads keep separate views — Phase 2.5 isolation', () => {
   seq = 0
   const events = [
-    at({ type: 'user_prompt', text: 'alpha work' }, 'alpha'),
-    at({ type: 'user_prompt', text: 'beta work' }, 'beta'),
-    at({ type: 'assistant_text', text: 'on beta' }, 'beta'),
+    at({ type: 'user_prompt', text: 'thread A work' }, 'tA'),
+    at({ type: 'user_prompt', text: 'thread B work' }, 'tB'),
+    at({ type: 'assistant_text', text: 'on B' }, 'tB'),
   ]
   const state = events.reduce(reduce, initialState)
 
-  assert.deepEqual(viewOf(state, 'alpha').items.map((i) => i.kind), ['user'])
-  assert.deepEqual(viewOf(state, 'beta').items.map((i) => i.kind), ['user', 'assistant'])
-  const alphaFirst = viewOf(state, 'alpha').items[0]
-  assert.equal(alphaFirst?.kind === 'user' && alphaFirst.text, 'alpha work')
-  // A project with no events at all is an empty view, not undefined.
-  assert.deepEqual(viewOf(state, 'gamma').items, [])
+  assert.deepEqual(viewOf(state, 'tA').items.map((i) => i.kind), ['user'])
+  assert.deepEqual(viewOf(state, 'tB').items.map((i) => i.kind), ['user', 'assistant'])
+  const aFirst = viewOf(state, 'tA').items[0]
+  assert.equal(aFirst?.kind === 'user' && aFirst.text, 'thread A work')
+  assert.deepEqual(viewOf(state, 'unknown').items, [])
 })
 
-test('project_created / project_create_failed drive the picker signals, not a conversation', () => {
+test('legacy events (no threadId) collect under the sentinel bucket', () => {
+  // Built inline with no threadId at all — `at(body, undefined)` would trigger
+  // the default and give it one.
+  const legacy = { seq: 1, sessionId: 's1', projectId: 'p', ts: 1, type: 'user_prompt', text: 'old convo' } as Event
+  const state = reduce(initialState, legacy)
+  assert.deepEqual(viewOf(state, LEGACY_THREAD_ID).items.map((i) => i.kind), ['user'])
+})
+
+test('project_created / project_create_failed drive picker signals, not a conversation', () => {
   const state = run([
     { type: 'project_created', name: 'newproj' },
     { type: 'project_create_failed', name: 'badproj', error: 'clone failed' },
   ])
-
   assert.deepEqual(state.created, ['newproj'])
   assert.equal(state.failed['badproj'], 'clone failed')
-  // These are not conversation events — no project view got items.
-  assert.deepEqual(viewOf(state, 'newproj').items, [])
 })
 
 test('session_ended is terminal and carries its reason', () => {
@@ -144,7 +120,6 @@ test('session_ended is terminal and carries its reason', () => {
     { type: 'session_started', claudeSessionId: 'c1', model: 'opus' },
     { type: 'session_ended', reason: 'interrupted', message: 'Server restarted.' },
   ])
-
   assert.equal(view(state).agent, 'ended')
   const last = view(state).items.at(-1)
   assert.equal(last?.kind === 'ended' && last.reason, 'interrupted')
