@@ -13,8 +13,12 @@ self.addEventListener('push', (event) => {
 
   event.waitUntil(
     (async () => {
-      // Suppress if the app is already open and visible: buzzing the phone in
-      // your hand while you read the very card it points at is worse than useless.
+      // Backstop suppression: the server (Notifier + Presence, see
+      // apps/workspace-server/src/presence.ts) is the primary decision maker
+      // and shouldn't be sending this push at all while a tab is visible. This
+      // check exists because `Client.visibilityState` here is a known-flaky
+      // bridge on iOS Safari and can't be trusted alone — but when it *does*
+      // correctly see a visible window, no reason not to also skip showing.
       // iOS requires userVisibleOnly, so we cannot receive a push and show
       // nothing — the decision has to happen here, in the handler.
       const clients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })

@@ -372,3 +372,16 @@ export interface NameCheckResponse {
  * collecting the data that becomes your allowlist rather than guessing it.
  */
 export type AutoApprovedTool = 'Read' | 'Grep' | 'Glob'
+
+// --- Presence, so a push never buzzes a screen someone is already looking at --
+
+/**
+ * POST /api/presence — the page reporting its own `document.visibilityState`.
+ * `clientId` is a random id minted once per tab (localStorage) and reused for
+ * the lifetime of that tab, so the server can tell "this tab went hidden" from
+ * "some other tab is still visible" instead of tracking one global flag.
+ */
+export interface PresenceRequest {
+  clientId: string
+  visible: boolean
+}

@@ -6,6 +6,7 @@ import type { BuildTracker } from './build-tracker.ts'
 import type { Config } from './config.ts'
 import type { Github } from './github.ts'
 import type { EventLog } from './log.ts'
+import type { Presence } from './presence.ts'
 import type { ProjectStore } from './projects.ts'
 import type { Pusher } from './push.ts'
 import type { PushStore } from './push-store.ts'
@@ -16,6 +17,7 @@ import { registerDebug } from './routes/debug.ts'
 import { registerEnv } from './routes/env.ts'
 import { registerEvents } from './routes/events.ts'
 import { registerGithub } from './routes/github.ts'
+import { registerPresence } from './routes/presence.ts'
 import { registerProjects } from './routes/projects.ts'
 import { registerPrompt } from './routes/prompt.ts'
 import { registerPush } from './routes/push.ts'
@@ -31,10 +33,11 @@ export interface Services {
   github: Github | undefined
   pushStore: PushStore
   pusher: Pusher
+  presence: Presence
 }
 
 export async function buildServer(config: Config, services: Services): Promise<FastifyInstance> {
-  const { log, sessions, projects, builds, github, pushStore, pusher } = services
+  const { log, sessions, projects, builds, github, pushStore, pusher, presence } = services
   const app = Fastify({
     logger: config.isDev
       ? { transport: { target: 'pino-pretty', options: { translateTime: 'HH:MM:ss' } } }
@@ -56,7 +59,8 @@ export async function buildServer(config: Config, services: Services): Promise<F
     pushReady: pusher.enabled,
   }))
 
-  registerEvents(app, log, config)
+  registerEvents(app, log, config, presence)
+  registerPresence(app, presence)
   registerProjects(app, projects)
   registerBuild(app, builds, projects, config)
   registerChanges(app, projects)

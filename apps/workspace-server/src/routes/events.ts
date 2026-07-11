@@ -2,6 +2,7 @@ import type { Event } from '@mce/protocol'
 import type { FastifyInstance } from 'fastify'
 import type { Config } from '../config.ts'
 import type { EventLog } from '../log.ts'
+import type { Presence } from '../presence.ts'
 
 /** Intermediaries idle out long-lived connections. A comment frame is not an event. */
 const PING_MS = 20_000
@@ -13,11 +14,12 @@ const PING_MS = 20_000
  * from it and attach to the live fan-out. That is the entire reconnect story,
  * and it's why locking your phone mid-run is not an error case.
  */
-export function registerEvents(app: FastifyInstance, log: EventLog, config: Config): void {
+export function registerEvents(app: FastifyInstance, log: EventLog, config: Config, presence: Presence): void {
   app.get('/api/events', (request, reply) => {
     // The header is what EventSource sends. The query param is for `curl`.
-    const query = request.query as { lastEventId?: string }
+    const query = request.query as { lastEventId?: string; clientId?: string }
     const lastSeq = parseSeq(request.headers['last-event-id']) ?? parseSeq(query.lastEventId) ?? 0
+    const clientId = query.clientId
 
     reply.hijack()
     const res = reply.raw
@@ -64,6 +66,11 @@ export function registerEvents(app: FastifyInstance, log: EventLog, config: Conf
     const cleanup = (): void => {
       clearInterval(ping)
       unsubscribe()
+      // A dropped connection is the eager "this tab is gone" signal — covers a
+      // force-quit or lost network that never got to POST /api/presence itself.
+      // A reconnect (the common case, e.g. iOS resuming a suspended page)
+      // re-asserts its own visibility on `onopen`, so this self-heals fast.
+      if (clientId) presence.clear(clientId)
     }
     request.raw.on('close', cleanup)
     res.on('error', cleanup)

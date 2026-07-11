@@ -10,6 +10,7 @@ import type {
   NameCheckResponse,
   NewThreadResponse,
   FileDiffResponse,
+  PresenceRequest,
   Project,
   ProjectsResponse,
   PromptRequest,
@@ -30,7 +31,32 @@ import type {
  */
 const BASE: string = import.meta.env.VITE_API_BASE ?? ''
 
-export const eventStreamUrl = (): string => `${BASE}/api/events`
+/** `clientId` ties this connection to its presence reports — see reportVisibility. */
+export const eventStreamUrl = (clientId: string): string =>
+  `${BASE}/api/events?clientId=${encodeURIComponent(clientId)}`
+
+/**
+ * Tells the server whether this tab can currently be seen, so the Notifier
+ * never buzzes a screen someone is already looking at. Fire-and-forget by
+ * design — a lost presence update just means a push that should've been
+ * suppressed goes through, never the other way around (see notifier.ts).
+ *
+ * `sendBeacon` on the way to hidden: that call happens right as the page may
+ * be frozen (iOS backgrounding), and a beacon is queued by the browser itself
+ * rather than riding a fetch that can get cancelled mid-flight.
+ */
+export function reportVisibility(clientId: string, visible: boolean): void {
+  const body = JSON.stringify({ clientId, visible } satisfies PresenceRequest)
+  const url = `${BASE}/api/presence`
+
+  if (!visible && navigator.sendBeacon?.(url, new Blob([body], { type: 'application/json' }))) return
+
+  void fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body, keepalive: true }).catch(
+    () => {
+      // Best-effort. The next visibilitychange or SSE reconnect tries again.
+    },
+  )
+}
 
 /** SSE of a project's live setup output (clone + install). */
 export const buildStreamUrl = (projectId: string): string =>

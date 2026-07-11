@@ -8,6 +8,7 @@ import { BuildTracker } from './build-tracker.ts'
 import type { Config } from './config.ts'
 import { openDb } from './db.ts'
 import { EventLog } from './log.ts'
+import { Presence } from './presence.ts'
 import { ProjectStore } from './projects.ts'
 import { Pusher } from './push.ts'
 import { PushStore } from './push-store.ts'
@@ -42,12 +43,13 @@ after(async () => {
   for (const fn of teardown) await fn()
 })
 
-async function boot(config: Config = DEV): Promise<{ base: string; log: EventLog }> {
+async function boot(config: Config = DEV): Promise<{ base: string; log: EventLog; presence: Presence }> {
   const db = openDb(':memory:')
   const log = new EventLog(db, makeRedactor([]))
   const pushStore = new PushStore(db)
   const builds = new BuildTracker()
   const projects = new ProjectStore(config.projectsRoot, log, undefined, builds)
+  const presence = new Presence()
   const app = await buildServer(config, {
     log,
     sessions: new SessionManager(log, config, projects),
@@ -56,6 +58,7 @@ async function boot(config: Config = DEV): Promise<{ base: string; log: EventLog
     github: undefined,
     pushStore,
     pusher: new Pusher(pushStore, config.vapid),
+    presence,
   })
   app.log.level = 'silent'
 
@@ -64,7 +67,7 @@ async function boot(config: Config = DEV): Promise<{ base: string; log: EventLog
   if (!address || typeof address === 'string') throw new Error('no port')
 
   teardown.push(() => app.close())
-  return { base: `http://127.0.0.1:${address.port}`, log }
+  return { base: `http://127.0.0.1:${address.port}`, log, presence }
 }
 
 const ORIGIN = 'http://localhost:5173'
@@ -143,6 +146,47 @@ test('a live append reaches an already-connected subscriber', async () => {
   abort.abort()
 
   assert.match(chunk, /"text":"live"/)
+})
+
+test('POST /api/presence records a tab as visible, reachable from the SSE route', async () => {
+  const { base, presence } = await boot()
+
+  const response = await fetch(`${base}/api/presence`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ clientId: 'tab-1', visible: true }),
+  })
+
+  assert.equal(response.status, 204)
+  assert.equal(presence.anyVisible, true)
+})
+
+test('POST /api/presence rejects a malformed body rather than silently no-op', async () => {
+  const { base } = await boot()
+
+  const response = await fetch(`${base}/api/presence`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ clientId: 'tab-1' }), // missing `visible`
+  })
+
+  assert.equal(response.status, 400)
+})
+
+test('a dropped SSE connection clears that tab from presence', async () => {
+  const { base, presence } = await boot()
+  presence.set('tab-1', true)
+
+  const abort = new AbortController()
+  // Headers arrive only after the route handler's synchronous setup (including
+  // `log.subscribe`) has already run — no need to wait on a body frame, which
+  // would block until the next 20s keepalive ping.
+  await fetch(`${base}/api/events?clientId=tab-1`, { signal: abort.signal })
+  abort.abort()
+
+  // The server's `close` handler runs asynchronously after the abort.
+  await new Promise((resolve) => setTimeout(resolve, 50))
+  assert.equal(presence.anyVisible, false, 'the tab that just disconnected can no longer claim to be visible')
 })
 
 test('with a web build: client routes serve index.html, /api routes stay JSON', async () => {

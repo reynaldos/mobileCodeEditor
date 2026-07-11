@@ -1,9 +1,30 @@
 import type { Event } from '@mce/protocol'
 import { useEffect, useReducer, useState } from 'react'
-import { eventStreamUrl } from './api.ts'
+import { eventStreamUrl, reportVisibility } from './api.ts'
 import { initialState, reduce, type State } from './events.ts'
 
 export type Connection = 'connecting' | 'live' | 'reconnecting'
+
+const CLIENT_ID_KEY = 'mce.clientId'
+
+/**
+ * A random id for this tab, reused across reloads via localStorage so the
+ * server's Presence tracker (presence.ts) can tell "this tab is still here,
+ * just reconnecting" from "a different tab." Falls back to a per-mount id if
+ * storage is unavailable (private browsing) — presence still works, it just
+ * can't survive a reload of that one tab.
+ */
+function clientId(): string {
+  try {
+    const existing = localStorage.getItem(CLIENT_ID_KEY)
+    if (existing) return existing
+    const fresh = crypto.randomUUID()
+    localStorage.setItem(CLIENT_ID_KEY, fresh)
+    return fresh
+  } catch {
+    return crypto.randomUUID()
+  }
+}
 
 /**
  * `EventSource` reconnects on its own and resends `Last-Event-ID` — the seq of
@@ -17,9 +38,22 @@ export function useEventStream(): { state: State; connection: Connection } {
   const [connection, setConnection] = useState<Connection>('connecting')
 
   useEffect(() => {
-    const source = new EventSource(eventStreamUrl())
+    const id = clientId()
+    const source = new EventSource(eventStreamUrl(id))
 
-    source.onopen = () => setConnection('live')
+    const reportCurrentVisibility = (): void => {
+      reportVisibility(id, document.visibilityState === 'visible')
+    }
+
+    source.onopen = () => {
+      setConnection('live')
+      // Re-assert on every open, including reconnects. The server clears this
+      // tab's presence when its connection drops (routes/events.ts), so after
+      // a network blip a still-visible tab must say so again — otherwise it
+      // sits marked "not visible" until the next real visibilitychange, and a
+      // push that should've been suppressed goes through.
+      reportCurrentVisibility()
+    }
 
     source.onmessage = (message) => {
       setConnection('live')
@@ -33,7 +67,12 @@ export function useEventStream(): { state: State; connection: Connection } {
     // Fires on every drop. The browser is already retrying; say so and wait.
     source.onerror = () => setConnection('reconnecting')
 
-    return () => source.close()
+    document.addEventListener('visibilitychange', reportCurrentVisibility)
+
+    return () => {
+      document.removeEventListener('visibilitychange', reportCurrentVisibility)
+      source.close()
+    }
   }, [])
 
   return { state, connection }

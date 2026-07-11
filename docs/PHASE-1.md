@@ -175,13 +175,30 @@ No polling, no second source of truth.
 | `turn_complete` | "Claude finished" | Only if nobody is watching. |
 | `session_ended` (`error`) | "Claude hit an error" | Always send. |
 
-`approval_request` always notifies, even with a browser tab open on a laptop, because a
-blocked agent is the one thing worth interrupting you for.
+~~`approval_request` always notifies, even with a browser tab open on a laptop, because a
+blocked agent is the one thing worth interrupting you for.~~
 
-`turn_complete` notifies only when `log.subscriberCount === 0` — no SSE connection means no
+~~`turn_complete` notifies only when `log.subscriberCount === 0` — no SSE connection means no
 one is looking. This is a decent proxy on a phone, where backgrounding kills the connection.
 It is a *bad* proxy if you leave a desktop tab open, and the consequence is a missed
-notification rather than a spurious one. Acceptable.
+notification rather than a spurious one. Acceptable.~~
+
+> **Superseded (2026-07-11).** Real usage showed the "always send" call for
+> `approval_request` was wrong: it buzzed the phone while you were mid-conversation, staring
+> at the very card the push pointed at. The service worker was already supposed to catch
+> this — `apps/web/public/sw.js` checks `clients.matchAll()` for a visible window before
+> `showNotification()` — but `Client.visibilityState` inside a service worker's `push`
+> handler is a known-flaky bridge on iOS Safari, which routinely reports a foregrounded PWA
+> as hidden. So the suppression silently no-opped.
+>
+> One rule now governs every event type, evaluated **before** the push is ever sent, not
+> after: never notify while `Presence.anyVisible` is true. `Presence` (`presence.ts`) is fed
+> by the page's own `document.visibilityState`, which is reliable — it's only the SW bridge
+> that wasn't — reported over `POST /api/presence` and re-asserted on every SSE `onopen`
+> (including reconnects, since a dropped connection clears that tab's presence entry). This
+> also retired `log.watcherCount` as the `turn_complete` proxy: an open SSE connection was
+> never actually "someone is looking," just "a tab exists somewhere." See `notifier.ts` for
+> the current rule.
 
 > **Notification text must not leak code.** "Claude wants to edit `page.tsx`" is fine. The
 > diff body is not. Notifications appear on a lock screen, and `approval_request` already

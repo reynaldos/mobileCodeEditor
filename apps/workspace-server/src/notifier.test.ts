@@ -5,6 +5,7 @@ import { setTimeout as sleep } from 'node:timers/promises'
 import { openDb } from './db.ts'
 import { EventLog } from './log.ts'
 import { Notifier } from './notifier.ts'
+import { Presence } from './presence.ts'
 import { Pusher } from './push.ts'
 import { PushStore } from './push-store.ts'
 import { makeRedactor } from './redact.ts'
@@ -19,9 +20,12 @@ interface Sent {
 
 /**
  * A Notifier wired to a fake pusher that records instead of sending. Push is
- * "enabled" (one subscription exists) so the notifier actually runs.
+ * "enabled" (one subscription exists) so the notifier actually runs. Presence
+ * starts empty (nobody visible), matching every existing test's expectation
+ * that a notification goes out — only the presence-specific tests below mark
+ * anyone visible.
  */
-function harness(): { log: EventLog; notifier: Notifier; sent: Sent[] } {
+function harness(): { log: EventLog; notifier: Notifier; presence: Presence; sent: Sent[] } {
   const db = openDb(':memory:')
   const log = new EventLog(db, makeRedactor([]))
   const store = new PushStore(db)
@@ -34,9 +38,10 @@ function harness(): { log: EventLog; notifier: Notifier; sent: Sent[] } {
     return { statusCode: 201 }
   })
 
-  const notifier = new Notifier(log, pusher)
+  const presence = new Presence()
+  const notifier = new Notifier(log, pusher, presence)
   notifier.start()
-  return { log, notifier, sent }
+  return { log, notifier, presence, sent }
 }
 
 // EventBody, not Omit<NewEvent, ...> — Omit does not distribute over a
@@ -87,21 +92,60 @@ test('approval body never carries the tool input — it would leak to a lock scr
   notifier.stop()
 })
 
-test('turn_complete notifies only when nobody is watching', async () => {
-  const { log, notifier, sent } = harness()
+test('turn_complete notifies only when nobody is visible', async () => {
+  const { log, notifier, presence, sent } = harness()
 
-  // A live SSE subscriber means someone is looking. No notification.
-  const unsub = log.subscribe(() => {})
+  // A visible tab means someone is looking. No notification.
+  presence.set('tab-1', true)
   emit(log, { type: 'turn_complete', numTurns: 2 })
   await sleep(50)
-  assert.equal(sent.length, 0, 'someone is watching')
+  assert.equal(sent.length, 0, 'someone is looking')
 
-  // Backgrounded: no subscribers. Notify.
-  unsub()
+  // Backgrounded: nobody visible. Notify.
+  presence.set('tab-1', false)
   emit(log, { type: 'turn_complete', numTurns: 3 })
   await sleep(50)
   assert.equal(sent.length, 1)
   assert.equal(sent[0]?.title, 'Claude finished')
+  notifier.stop()
+})
+
+test('approval_request is suppressed while someone is looking, unlike the old always-notify rule', async () => {
+  const { log, notifier, presence, sent } = harness()
+
+  presence.set('tab-1', true)
+  emit(log, { type: 'approval_request', approvalId: 'a1', toolUseId: 't1', tool: 'Edit', input: {}, title: 'Claude wants to edit foo.ts' })
+  await sleep(DEBOUNCE_WAIT)
+
+  assert.equal(sent.length, 0, 'the agent is blocked, but you are already looking at the card')
+  notifier.stop()
+})
+
+test('the debounced approval buzz is judged by presence at send time, not at request time', async () => {
+  const { log, notifier, presence, sent } = harness()
+
+  // Visible when the tool call comes in...
+  presence.set('tab-1', true)
+  emit(log, { type: 'approval_request', approvalId: 'a1', toolUseId: 't1', tool: 'Edit', input: {} })
+
+  // ...but you glance away before the debounce timer fires.
+  presence.set('tab-1', false)
+  await sleep(DEBOUNCE_WAIT)
+
+  assert.equal(sent.length, 1, 'evaluated when the buzz actually goes out')
+  notifier.stop()
+})
+
+test('a second visible tab keeps notifications suppressed after the first goes hidden', async () => {
+  const { log, notifier, presence, sent } = harness()
+
+  presence.set('phone', true)
+  presence.set('laptop', true)
+  presence.set('phone', false)
+
+  emit(log, { type: 'turn_complete', numTurns: 1 })
+  await sleep(50)
+  assert.equal(sent.length, 0, 'the laptop tab is still visible')
   notifier.stop()
 })
 
@@ -126,7 +170,7 @@ test('a disabled pusher means the notifier never subscribes', async () => {
   const log = new EventLog(db, makeRedactor([]))
   const store = new PushStore(db)
   const pusher = new Pusher(store, undefined) // no VAPID
-  const notifier = new Notifier(log, pusher)
+  const notifier = new Notifier(log, pusher, new Presence())
   notifier.start()
 
   emit(log, { type: 'approval_request', approvalId: 'a1', toolUseId: 't1', tool: 'Edit', input: {} })

@@ -1,5 +1,6 @@
 import type { Event } from '@mce/protocol'
 import type { EventLog } from './log.ts'
+import type { Presence } from './presence.ts'
 import type { Pusher } from './push.ts'
 
 /** Coalesce a burst of approvals in one turn into a single buzz. */
@@ -15,29 +16,35 @@ const systemClock: Clock = { now: () => Date.now() }
  * Turns log events into push notifications, on the same synchronous fan-out the
  * SSE route uses. No polling, no second source of truth.
  *
- * The judgment calls, all from PHASE-1.md:
+ * One rule now governs every event type: **never buzz a screen someone is
+ * already looking at.** `#send` gates on `presence.anyVisible` right before it
+ * actually pushes — evaluated at send time, not at event-arrival time, so a
+ * debounced approval burst is judged by whether you're looking *when the timer
+ * fires*, not when the first tool call happened.
  *
- *  - `approval_request` ALWAYS notifies. The agent is blocked and prompts have no
- *    deadline; this is the one thing worth interrupting you for.
- *  - `turn_complete` notifies only when nobody is watching (`subscriberCount === 0`,
- *    i.e. no live SSE connection). A missed buzz beats a spurious one.
- *  - `session_ended` with reason `error` always notifies.
- *
- * Notification text is drawn from the SDK's own human-phrased fields. It appears
- * on a lock screen, so it must never carry a diff body or a command.
+ * This used to be two different rules per PHASE-1.md — `approval_request`
+ * always notified regardless of who was watching, `turn_complete` only
+ * notified with no open SSE connection — reasoned about via `watcherCount`
+ * (an SSE-connection proxy for "someone might be looking"). `watcherCount`
+ * is gone from this decision: it can't tell foreground from a backgrounded
+ * tab that just hasn't dropped its connection yet. `Presence` (reported by
+ * the page's own `document.visibilityState`) is a direct signal instead of a
+ * proxy. See presence.ts.
  */
 export class Notifier {
   readonly #log: EventLog
   readonly #pusher: Pusher
+  readonly #presence: Presence
   readonly #clock: Clock
 
   #pendingApprovals = 0
   #approvalTimer: ReturnType<typeof setTimeout> | undefined
   #unsubscribe: (() => void) | undefined
 
-  constructor(log: EventLog, pusher: Pusher, clock: Clock = systemClock) {
+  constructor(log: EventLog, pusher: Pusher, presence: Presence, clock: Clock = systemClock) {
     this.#log = log
     this.#pusher = pusher
+    this.#presence = presence
     this.#clock = clock
   }
 
@@ -62,10 +69,7 @@ export class Notifier {
         return
 
       case 'turn_complete':
-        // Nobody watching means no open SSE connection — on a phone, backgrounded.
-        if (this.#log.watcherCount === 0) {
-          void this.#send({ title: 'Claude finished', body: 'Ready for your next message.', tag: 'turn' })
-        }
+        void this.#send({ title: 'Claude finished', body: 'Ready for your next message.', tag: 'turn' })
         return
 
       case 'session_ended':
@@ -124,6 +128,11 @@ export class Notifier {
   }
 
   async #send(n: { title: string; body: string; tag: string }): Promise<void> {
+    // The one gate every notification passes through. Evaluated now, not when
+    // the triggering event arrived — presence can change in the seconds an
+    // approval burst spends debouncing.
+    if (this.#presence.anyVisible) return
+
     try {
       await this.#pusher.notify({ ...n, url: '/' }, this.#clock.now())
     } catch {
