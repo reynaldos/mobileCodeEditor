@@ -138,3 +138,37 @@ test('AsyncQueue yields pushed items then ends on close', async () => {
   assert.deepEqual(drained, [1, 2, 3])
   assert.throws(() => queue.push(4), /push after close/)
 })
+
+test('referencedImageIds collects ids across every user_prompt, and only those', () => {
+  const log = freshLog()
+  log.append({ sessionId: 's1', projectId: 'p', ts: 1, type: 'user_prompt', text: 'no images here' })
+  log.append({
+    sessionId: 's1',
+    projectId: 'p',
+    ts: 2,
+    type: 'user_prompt',
+    text: 'two images',
+    images: [
+      { id: 'a.png', mediaType: 'image/png', size: 10 },
+      { id: 'b.jpg', mediaType: 'image/jpeg', size: 20 },
+    ],
+  })
+  log.append({
+    sessionId: 's2',
+    projectId: 'p2',
+    ts: 3,
+    type: 'user_prompt',
+    text: 'one more, different project',
+    images: [{ id: 'c.webp', mediaType: 'image/webp', size: 30 }],
+  })
+  // Not a user_prompt — must not contribute, even though it's a plausible shape.
+  text(log, 'assistant text mentioning a.png is not a reference')
+
+  assert.deepEqual([...log.referencedImageIds()].sort(), ['a.png', 'b.jpg', 'c.webp'])
+})
+
+test('referencedImageIds is empty when nothing has ever attached an image', () => {
+  const log = freshLog()
+  text(log, 'just chatting')
+  assert.deepEqual(log.referencedImageIds(), new Set())
+})

@@ -13,11 +13,13 @@ import { ProjectStore } from './projects.ts'
 import { makeRedactor } from './redact.ts'
 import type { QueryFn } from './session.ts'
 import { SessionManager, UnknownProjectError } from './session-manager.ts'
+import { UnknownImageError, UploadStore } from './uploads.ts'
 
 const BASE: Omit<Config, 'projectsRoot' | 'projectPath' | 'projectId'> = {
   port: 0,
   host: '127.0.0.1',
   dbPath: ':memory:',
+  uploadsRoot: mkdtempSync(join(tmpdir(), 'mce-uploads-')),
   claudeToken: 'test-token',
   model: undefined,
   isDev: true,
@@ -63,6 +65,7 @@ function recordingQuery(claudeSessionIds: string[]): {
 interface Harness {
   manager: SessionManager
   log: EventLog
+  uploads: UploadStore
   resumes: Array<string | undefined>
   firstPrompts: string[]
 }
@@ -84,9 +87,10 @@ function harness(
 
   const log = new EventLog(openDb(':memory:'), makeRedactor([]))
   const projects = new ProjectStore(root, log)
+  const uploads = new UploadStore(mkdtempSync(join(tmpdir(), 'mce-uploads-')))
   const { queryFn, resumes, firstPrompts } = recordingQuery(claudeSessionIds)
-  const manager = new SessionManager(log, config, projects, { queryFn, sessionExists })
-  return { manager, log, resumes, firstPrompts }
+  const manager = new SessionManager(log, config, projects, uploads, { queryFn, sessionExists })
+  return { manager, log, uploads, resumes, firstPrompts }
 }
 
 async function waitFor(predicate: () => boolean, label: string, ms = 2000): Promise<void> {
@@ -204,5 +208,12 @@ test('recoverOnBoot closes open sessions and expires parked approvals', async ()
 test('resolveApproval on an unknown id is not_pending', async () => {
   const { manager } = harness(['app'], ['c1'])
   assert.equal(manager.resolveApproval('ghost', true), 'not_pending')
+  await manager.shutdown()
+})
+
+test('prompt() with an unknown image id rejects with UnknownImageError', async () => {
+  const { manager } = harness(['app'], ['c1'])
+  const t = manager.newThread('app')
+  await assert.rejects(() => manager.prompt('app', t, 'go', ['ghost.png']), UnknownImageError)
   await manager.shutdown()
 })

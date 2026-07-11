@@ -1,4 +1,5 @@
 import cors from '@fastify/cors'
+import multipart from '@fastify/multipart'
 import fastifyStatic from '@fastify/static'
 import Fastify, { type FastifyInstance } from 'fastify'
 import { existsSync } from 'node:fs'
@@ -23,7 +24,9 @@ import { registerPrompt } from './routes/prompt.ts'
 import { registerPush } from './routes/push.ts'
 import { registerQuestions } from './routes/questions.ts'
 import { registerThreads } from './routes/threads.ts'
+import { registerUploads } from './routes/uploads.ts'
 import type { SessionManager } from './session-manager.ts'
+import { MAX_IMAGE_BYTES, MAX_IMAGES_PER_UPLOAD, type UploadStore } from './uploads.ts'
 
 export interface Services {
   log: EventLog
@@ -34,10 +37,11 @@ export interface Services {
   pushStore: PushStore
   pusher: Pusher
   presence: Presence
+  uploads: UploadStore
 }
 
 export async function buildServer(config: Config, services: Services): Promise<FastifyInstance> {
-  const { log, sessions, projects, builds, github, pushStore, pusher, presence } = services
+  const { log, sessions, projects, builds, github, pushStore, pusher, presence, uploads } = services
   const app = Fastify({
     logger: config.isDev
       ? { transport: { target: 'pino-pretty', options: { translateTime: 'HH:MM:ss' } } }
@@ -49,6 +53,11 @@ export async function buildServer(config: Config, services: Services): Promise<F
   if (config.isDev) {
     await app.register(cors, { origin: true })
   }
+
+  // These limits apply only to multipart/form-data parsing (busboy reads the
+  // raw stream directly, bypassing Fastify's JSON `bodyLimit`) — so raising
+  // them here does not weaken the default 1MB cap on every other route's body.
+  await app.register(multipart, { limits: { fileSize: MAX_IMAGE_BYTES, files: MAX_IMAGES_PER_UPLOAD } })
 
   app.get('/api/health', async () => ({
     ok: true,
@@ -72,6 +81,7 @@ export async function buildServer(config: Config, services: Services): Promise<F
   registerQuestions(app, sessions)
   registerPush(app, config, pushStore, pusher)
   registerDebug(app, log, config)
+  registerUploads(app, uploads)
 
   // Serving the PWA from this same origin is what deletes CORS, mixed content,
   // and cross-service tokens from the project. See ARCHITECTURE.md.

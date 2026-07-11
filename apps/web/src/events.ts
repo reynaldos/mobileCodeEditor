@@ -1,4 +1,4 @@
-import { LEGACY_THREAD_ID, type ChangedFile, type Event, type Question } from '@mce/protocol'
+import { LEGACY_THREAD_ID, type ChangedFile, type Event, type ImageRef, type Question } from '@mce/protocol'
 
 /**
  * A reducer over the event union. Events in, renderable per-thread views out.
@@ -11,7 +11,7 @@ import { LEGACY_THREAD_ID, type ChangedFile, type Event, type Question } from '@
  */
 
 export type Item =
-  | { kind: 'user'; key: string; text: string }
+  | { kind: 'user'; key: string; text: string; images?: ImageRef[] }
   | { kind: 'assistant'; key: string; text: string }
   | {
       kind: 'tool'
@@ -148,7 +148,11 @@ function reduceProject(state: ProjectState, event: Event): ProjectState {
       return { ...state, agent: 'thinking', sessionId: event.sessionId }
 
     case 'user_prompt':
-      return { ...state, agent: 'thinking', items: [...state.items, { kind: 'user', key, text: event.text }] }
+      return {
+        ...state,
+        agent: 'thinking',
+        items: [...state.items, { kind: 'user', key, text: event.text, ...(event.images ? { images: event.images } : {}) }],
+      }
 
     case 'assistant_text':
       return { ...state, items: [...state.items, { kind: 'assistant', key, text: event.text }] }

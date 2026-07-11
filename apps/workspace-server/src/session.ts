@@ -6,13 +6,14 @@ import type {
   SDKMessage,
   SDKUserMessage,
 } from '@anthropic-ai/claude-agent-sdk'
-import type { EventBody, NewEvent, Question, SessionStatus } from '@mce/protocol'
+import type { EventBody, ImageRef, NewEvent, Question, SessionStatus } from '@mce/protocol'
 import { randomUUID } from 'node:crypto'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { AsyncQueue } from './async-queue.ts'
 import { assertAgentCredentials, type Config } from './config.ts'
 import { changedFiles, headSha } from './git-changes.ts'
 import type { EventLog } from './log.ts'
+import type { UploadStore } from './uploads.ts'
 
 /**
  * Tools we never prompt on.
@@ -60,6 +61,8 @@ export interface AgentSessionOptions {
   readonly threadId: string
   /** The project's directory — the agent's `cwd`. */
   readonly projectPath: string
+  /** Where uploaded images live — read at send time to build multimodal content. */
+  readonly uploads: UploadStore
   /** A Claude session id to natively resume — when its transcript still exists. */
   readonly resume?: string
   /**
@@ -80,6 +83,7 @@ export class AgentSession {
   readonly #log: EventLog
   readonly #config: Config
   readonly #projectPath: string
+  readonly #uploads: UploadStore
   readonly #resume: string | undefined
   #recap: string | undefined
   readonly #queryFn: QueryFn
@@ -105,6 +109,7 @@ export class AgentSession {
     this.#log = opts.log
     this.#config = opts.config
     this.#projectPath = opts.projectPath
+    this.#uploads = opts.uploads
     this.#resume = opts.resume
     this.#recap = opts.recap
     this.#queryFn = opts.queryFn ?? query
@@ -149,15 +154,26 @@ export class AgentSession {
     this.#done = this.#consume()
   }
 
-  /** Appends `user_prompt` and feeds the agent. Returns immediately. */
-  prompt(text: string): void {
+  /**
+   * Appends `user_prompt` and feeds the agent. Returns immediately.
+   *
+   * `imageIds` come from a prior POST /api/uploads/images. Resolved to bytes
+   * BEFORE anything is appended — a bad id must never leave an orphaned
+   * `user_prompt` event with nothing actually sent to Claude. The event only
+   * ever stores lightweight refs (id/mediaType/size); the bytes themselves
+   * never enter the log. See UploadStore and DECISIONS #5.
+   */
+  prompt(text: string, imageIds: string[] = []): void {
     if (!this.#query) throw new Error('session not started')
     if (this.#queue.closed) throw new Error('session is closing')
+
+    const images = imageIds.map((id) => ({ id, ...this.#uploads.read(id) }))
 
     // Log the user's real text — that's what the UI shows. Claude receives the
     // recap folded in ahead of it, but only on the first prompt of a recapped
     // thread, so it has context without a native resume. See PHASE-2.5.
-    this.#append({ type: 'user_prompt', text })
+    const refs: ImageRef[] = images.map(({ id, mediaType, bytes }) => ({ id, mediaType, size: bytes.length }))
+    this.#append({ type: 'user_prompt', text, ...(refs.length ? { images: refs } : {}) })
     const toClaude = this.#recap ? `${this.#recap}\n\n---\n\n${text}` : text
     this.#recap = undefined
 
@@ -166,9 +182,23 @@ export class AgentSession {
     this.#turnBase = headSha(this.#projectPath)
 
     this.#status = 'thinking'
+
+    // No publicly reachable URL for Anthropic's API to fetch from this
+    // Tailscale-only host, so images always go as base64, read off disk now.
+    const content =
+      images.length === 0
+        ? toClaude
+        : [
+            { type: 'text' as const, text: toClaude },
+            ...images.map(({ mediaType, bytes }) => ({
+              type: 'image' as const,
+              source: { type: 'base64' as const, media_type: mediaType, data: bytes.toString('base64') },
+            })),
+          ]
+
     this.#queue.push({
       type: 'user',
-      message: { role: 'user', content: toClaude },
+      message: { role: 'user', content },
       parent_tool_use_id: null,
     })
   }

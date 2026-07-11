@@ -1,7 +1,9 @@
 import type { PermissionResult, Query, SDKMessage, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
 import type { Event } from '@mce/protocol'
 import assert from 'node:assert/strict'
+import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { test } from 'node:test'
 import { setTimeout as sleep } from 'node:timers/promises'
 import type { Config } from './config.ts'
@@ -9,6 +11,7 @@ import { openDb } from './db.ts'
 import { EventLog } from './log.ts'
 import { makeRedactor } from './redact.ts'
 import { AgentSession, type QueryFn } from './session.ts'
+import { UnknownImageError, UploadStore } from './uploads.ts'
 
 /**
  * Drives the real message loop and approval bridge with a fake `query`, so the
@@ -22,6 +25,7 @@ const CONFIG: Config = {
   projectPath: tmpdir(),
   projectId: 'test',
   projectsRoot: tmpdir(),
+  uploadsRoot: mkdtempSync(join(tmpdir(), 'mce-uploads-')),
   claudeToken: 'test-token',
   model: undefined,
   isDev: true,
@@ -54,8 +58,9 @@ interface QueryParams {
 const fakeQuery = (gen: (params: QueryParams) => AsyncGenerator<SDKMessage, void>): QueryFn =>
   ((params: QueryParams) => gen(params) as unknown as Query) as unknown as QueryFn
 
-function makeSession(queryFn: QueryFn): { session: AgentSession; log: EventLog } {
+function makeSession(queryFn: QueryFn): { session: AgentSession; log: EventLog; uploads: UploadStore } {
   const log = new EventLog(openDb(':memory:'), makeRedactor([]))
+  const uploads = new UploadStore(mkdtempSync(join(tmpdir(), 'mce-uploads-')))
   const session = new AgentSession({
     id: 's1',
     log,
@@ -63,9 +68,10 @@ function makeSession(queryFn: QueryFn): { session: AgentSession; log: EventLog }
     projectId: 'test',
     threadId: 'th1',
     projectPath: CONFIG.projectPath,
+    uploads,
     queryFn,
   })
-  return { session, log }
+  return { session, log, uploads }
 }
 
 const types = (log: EventLog): string[] => log.replaySince(0).map((e) => e.type)
@@ -475,5 +481,50 @@ test('a malformed AskUserQuestion input falls back to a generic approval card', 
 
   assert.ok(types(log).includes('approval_request'))
   assert.ok(!types(log).includes('question_request'))
+  await session.stop()
+})
+
+// ---------------------------------------------------------------------------
+// Images (attached to a prompt, forwarded to Claude as multimodal content).
+
+test('prompt() with images logs a lightweight ref — never base64 — and sends Claude a multimodal content array', async () => {
+  const capturedContent: unknown[] = []
+  const { session, log, uploads } = makeSession(
+    fakeQuery(async function* ({ prompt }) {
+      yield init()
+      for await (const msg of prompt as AsyncIterable<{ message: { content: unknown } }>) {
+        capturedContent.push(msg.message.content)
+        yield done()
+      }
+    }),
+  )
+  const ref = uploads.save(Buffer.from('fake png bytes'), 'image/png')
+
+  session.start()
+  session.prompt('what is this?', [ref.id])
+  await waitFor(() => session.status === 'awaiting_input', 'turn to finish')
+
+  const promptEvent = log.replaySince(0).find((e) => e.type === 'user_prompt')
+  assert.ok(promptEvent?.type === 'user_prompt')
+  assert.deepEqual(promptEvent.images, [{ id: ref.id, mediaType: 'image/png', size: 14 }])
+  assert.equal(JSON.stringify(promptEvent).includes(Buffer.from('fake png bytes').toString('base64')), false, 'no base64 in the logged payload')
+
+  const content = capturedContent[0] as Array<{ type: string; text?: string; source?: { data: string; media_type: string } }>
+  assert.equal(content[0]?.type, 'text')
+  assert.equal(content[0]?.text, 'what is this?')
+  assert.equal(content[1]?.type, 'image')
+  assert.equal(content[1]?.source?.media_type, 'image/png')
+  assert.equal(content[1]?.source?.data, Buffer.from('fake png bytes').toString('base64'))
+
+  await session.stop()
+})
+
+test('prompt() with an unknown image id throws and appends no user_prompt event', async () => {
+  const { session, log } = makeSession(fakeQuery(async function* () { yield init() }))
+  session.start()
+
+  assert.throws(() => session.prompt('go', ['ghost.png']), UnknownImageError)
+  assert.ok(!types(log).includes('user_prompt'), 'a bad id must never leave an orphaned event')
+
   await session.stop()
 })

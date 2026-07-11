@@ -1,6 +1,7 @@
 import { LEGACY_THREAD_ID, type PromptRequest, type PromptResponse } from '@mce/protocol'
 import type { FastifyInstance } from 'fastify'
 import { SessionManager, UnknownProjectError } from '../session-manager.ts'
+import { UnknownImageError } from '../uploads.ts'
 
 /**
  * Returns 202 immediately. Everything that happens next arrives over SSE —
@@ -12,6 +13,9 @@ export function registerPrompt(app: FastifyInstance, sessions: SessionManager): 
     const text = body?.text?.trim()
     const projectId = body?.projectId?.trim()
     const threadId = body?.threadId?.trim()
+    const imageIds = Array.isArray(body?.imageIds)
+      ? body.imageIds.filter((v): v is string => typeof v === 'string')
+      : []
 
     if (!text) return reply.code(400).send({ error: 'text is required' })
     if (!projectId) return reply.code(400).send({ error: 'projectId is required' })
@@ -21,11 +25,14 @@ export function registerPrompt(app: FastifyInstance, sessions: SessionManager): 
     }
 
     try {
-      const sessionId = await sessions.prompt(projectId, threadId, text)
+      const sessionId = await sessions.prompt(projectId, threadId, text, imageIds)
       return reply.code(202).send({ sessionId } satisfies PromptResponse)
     } catch (err) {
       if (err instanceof UnknownProjectError) {
         return reply.code(404).send({ error: err.message })
+      }
+      if (err instanceof UnknownImageError) {
+        return reply.code(400).send({ error: `unknown image: ${err.id}` })
       }
       // Almost always a missing CLAUDE_CODE_OAUTH_TOKEN. Say so plainly.
       request.log.error({ err }, 'failed to start or feed session')

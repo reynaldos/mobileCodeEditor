@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react'
+import { imageUrl } from '../api.ts'
 import type { Item } from '../events.ts'
 import { relativePath, targetOf } from '../paths.ts'
 import { ApprovalCard } from './ApprovalCard.tsx'
@@ -58,6 +59,13 @@ function Row({ item, projectId }: { item: Item; projectId?: string }): React.JSX
         // bubble past the viewport. `break-words` is not enough for a string with
         // no break opportunities at all.
         <div className="max-w-[85%] self-end whitespace-pre-wrap rounded-[14px] rounded-br-[4px] bg-accent px-3 py-2.5 text-[#06101f] [overflow-wrap:anywhere]">
+          {item.images && item.images.length > 0 && (
+            <div className="mb-1.5 flex flex-wrap gap-1.5">
+              {item.images.map((img) => (
+                <img key={img.id} src={imageUrl(img.id)} alt="" className="size-24 rounded-lg object-cover" />
+              ))}
+            </div>
+          )}
           {item.text}
         </div>
       )

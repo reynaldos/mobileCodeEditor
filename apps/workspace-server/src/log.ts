@@ -348,6 +348,23 @@ export class EventLog {
       .all() as Array<{ name: string; repoUrl?: string; ts: number }>
   }
 
+  /**
+   * Every image id ever attached to a `user_prompt`, across all projects and
+   * threads. Fed to UploadStore.sweepOrphans on boot so an upload that was
+   * actually sent survives forever, even after the compose box that staged it
+   * is long gone.
+   */
+  referencedImageIds(): Set<string> {
+    const rows = this.#db
+      .prepare(
+        `SELECT DISTINCT json_extract(je.value, '$.id') AS imageId
+           FROM events AS e, json_each(json_extract(e.payload, '$.images')) AS je
+          WHERE e.type = 'user_prompt'`,
+      )
+      .all() as Array<{ imageId: string | null }>
+    return new Set(rows.map((r) => r.imageId).filter((id): id is string => typeof id === 'string'))
+  }
+
   countOfType(type: EventType): number {
     const row = this.#db.prepare(`SELECT COUNT(*) AS n FROM events WHERE type = ?`).get(type) as {
       n: number

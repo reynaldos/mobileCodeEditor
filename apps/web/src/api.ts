@@ -7,6 +7,7 @@ import type {
   EnvFileResponse,
   GithubRepo,
   GithubReposResponse,
+  ImageRef,
   NameCheckResponse,
   NewThreadResponse,
   FileDiffResponse,
@@ -18,6 +19,7 @@ import type {
   RenameThreadRequest,
   Thread,
   ThreadsResponse,
+  UploadImagesResponse,
 } from '@mce/protocol'
 
 /**
@@ -87,9 +89,39 @@ async function post<T>(path: string, body: unknown): Promise<T | undefined> {
 }
 
 /** 202. The answer arrives over SSE, not in this response. */
-export async function sendPrompt(text: string, projectId: string, threadId: string): Promise<PromptResponse> {
-  return (await post<PromptResponse>('/api/prompt', { text, projectId, threadId } satisfies PromptRequest))!
+export async function sendPrompt(
+  text: string,
+  projectId: string,
+  threadId: string,
+  imageIds: string[] = [],
+): Promise<PromptResponse> {
+  return (await post<PromptResponse>('/api/prompt', {
+    text,
+    projectId,
+    threadId,
+    ...(imageIds.length ? { imageIds } : {}),
+  } satisfies PromptRequest))!
 }
+
+/**
+ * Upload one or more images, staged for the next prompt. A raw `fetch`, not
+ * `post()` — that helper hardcodes JSON content-type, but a multipart body
+ * needs the browser to set its own boundary.
+ */
+export async function uploadImages(files: File[]): Promise<ImageRef[]> {
+  const form = new FormData()
+  for (const file of files) form.append('images', file, file.name)
+
+  const response = await fetch(`${BASE}/api/uploads/images`, { method: 'POST', body: form })
+  if (!response.ok) {
+    const detail = await response.json().catch(() => ({}) as { error?: string })
+    throw new ApiError(response.status, detail.error ?? response.statusText)
+  }
+  return ((await response.json()) as UploadImagesResponse).images
+}
+
+/** Where an uploaded image's bytes live — used for both the compose-box preview and message rendering. */
+export const imageUrl = (id: string): string => `${BASE}/api/uploads/images/${encodeURIComponent(id)}`
 
 /** The project's threads, newest activity first. */
 export async function fetchThreads(projectId: string): Promise<Thread[]> {

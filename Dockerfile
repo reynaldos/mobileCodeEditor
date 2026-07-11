@@ -62,6 +62,7 @@ ENV NODE_ENV=production \
     HOST=0.0.0.0 \
     PORT=3000 \
     DB_PATH=/data/events.db \
+    UPLOADS_ROOT=/data/uploads \
     WEB_DIST=/app/apps/web/dist \
     PROJECT_PATH=/projects/app
 

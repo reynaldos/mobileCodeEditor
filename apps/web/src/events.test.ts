@@ -31,6 +31,23 @@ test('a full turn renders in order', () => {
   assert.equal(view(state).sessionId, 's1')
 })
 
+test('a user_prompt carrying images produces a user item with images populated', () => {
+  const images = [{ id: 'a.png', mediaType: 'image/png' as const, size: 123 }]
+  const state = run([{ type: 'user_prompt', text: 'what is this?', images }])
+
+  const [item] = view(state).items
+  assert.equal(item?.kind, 'user')
+  assert.deepEqual(item?.kind === 'user' ? item.images : undefined, images)
+})
+
+test('a user_prompt with no images leaves the field absent, not an empty array', () => {
+  const state = run([{ type: 'user_prompt', text: 'no images here' }])
+
+  const [item] = view(state).items
+  assert.equal(item?.kind, 'user')
+  assert.equal(item?.kind === 'user' ? item.images : undefined, undefined)
+})
+
 test('tool_result finds its tool_use even with items appended in between', () => {
   const state = run([
     { type: 'tool_use', toolUseId: 't1', name: 'Grep', input: {} },

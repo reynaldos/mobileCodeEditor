@@ -18,6 +18,7 @@ export NODE_ENV=production
 export HOST=0.0.0.0
 export PORT="${PORT:-3000}"
 export DB_PATH=/data/events.db
+export UPLOADS_ROOT=/data/uploads
 export WEB_DIST=/app/apps/web/dist
 # PROJECT_PATH is overridable, unlike the fixed paths above. Fly Machines allow
 # only one volume, so on Fly everything (log, projects, tailscale state) lives

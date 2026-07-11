@@ -17,6 +17,8 @@ export interface Config {
   readonly projectId: string
   /** Parent of the projects (Phase 2). Every project is a directory under here. */
   readonly projectsRoot: string
+  /** Uploaded image files, under the same persistent volume as dbPath/projectsRoot. */
+  readonly uploadsRoot: string
   /** Absent is legal — the log, SSE, and debug injector all work without it. */
   readonly claudeToken: string | undefined
   readonly model: string | undefined
@@ -61,6 +63,7 @@ export function loadConfig(): Config {
     projectPath,
     projectId: basename(projectPath),
     projectsRoot: resolve(process.env.PROJECTS_ROOT ?? dirname(projectPath)),
+    uploadsRoot: resolve(process.env.UPLOADS_ROOT ?? './data/uploads'),
     // Deliberately not required at boot. You can build and verify the whole SSE
     // and replay path before the agent exists — that's the Block 2 gate.
     claudeToken: process.env.CLAUDE_CODE_OAUTH_TOKEN?.trim() || undefined,

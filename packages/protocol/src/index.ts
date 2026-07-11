@@ -33,7 +33,7 @@ export type ApiKeySource = 'user' | 'project' | 'org' | 'temporary' | 'oauth'
 export type EventBody =
   /** The agent came up. `claudeSessionId` is what we pass to `resume` after a crash. */
   | { type: 'session_started'; claudeSessionId: string; model: string; apiKeySource?: ApiKeySource }
-  | { type: 'user_prompt'; text: string }
+  | { type: 'user_prompt'; text: string; images?: ImageRef[] }
   /** A complete assistant message. Never a token delta — see DECISIONS #7. */
   | { type: 'assistant_text'; text: string }
   | { type: 'tool_use'; toolUseId: string; name: string; input: unknown }
@@ -150,6 +150,8 @@ export interface PromptRequest {
   threadId?: string
   /** Legacy reset flag; superseded by threads. Kept until the routes move to threads. */
   fresh?: boolean
+  /** Ids from a prior POST /api/uploads/images, attached to this prompt. */
+  imageIds?: string[]
 }
 
 /** 202 Accepted. Everything that happens next arrives over SSE. */
@@ -385,4 +387,26 @@ export type AutoApprovedTool = 'Read' | 'Grep' | 'Glob'
 export interface PresenceRequest {
   clientId: string
   visible: boolean
+}
+
+// --- Images: attached to a prompt, forwarded to Claude as multimodal content --
+
+/** Formats Claude's API accepts as image content blocks. */
+export type ImageMediaType = 'image/jpeg' | 'image/png' | 'image/webp' | 'image/gif'
+
+/**
+ * A stored image, referenced by id. The id is opaque to the client but is in
+ * fact the server's filename (uuid + extension) — never inline bytes here;
+ * that's what keeps the event log light. See workspace-server's UploadStore.
+ */
+export interface ImageRef {
+  id: string
+  mediaType: ImageMediaType
+  /** Bytes on disk, for client display ("2.1 MB"). */
+  size: number
+}
+
+/** POST /api/uploads/images — multipart/form-data, field "images", 1..N files. */
+export interface UploadImagesResponse {
+  images: ImageRef[]
 }

@@ -12,6 +12,7 @@ import { PushStore } from './push-store.ts'
 import { makeRedactor } from './redact.ts'
 import { buildServer } from './server.ts'
 import { SessionManager } from './session-manager.ts'
+import { UploadStore } from './uploads.ts'
 
 const config = loadConfig()
 
@@ -27,7 +28,8 @@ const log = new EventLog(db, makeRedactor(secretsOf(config)))
 const github = process.env.GH_TOKEN ? new Github() : undefined
 const builds = new BuildTracker()
 const projects = new ProjectStore(config.projectsRoot, log, github, builds)
-const sessions = new SessionManager(log, config, projects)
+const uploads = new UploadStore(config.uploadsRoot)
+const sessions = new SessionManager(log, config, projects, uploads)
 const pushStore = new PushStore(db)
 const pusher = new Pusher(pushStore, config.vapid)
 const presence = new Presence()
@@ -36,12 +38,15 @@ const presence = new Presence()
 // not. Recover interrupted sessions and builds into terminal events.
 sessions.recoverOnBoot()
 projects.recoverOnBoot()
+// An upload whose prompt was never sent has zero long-term value and would
+// otherwise accumulate forever on a capacity-constrained volume. See UploadStore.
+uploads.sweepOrphans(log.referencedImageIds())
 
 // Turns log events into push notifications, on the same fan-out as SSE.
 const notifier = new Notifier(log, pusher, presence)
 notifier.start()
 
-const app = await buildServer(config, { log, sessions, projects, builds, github, pushStore, pusher, presence })
+const app = await buildServer(config, { log, sessions, projects, builds, github, pushStore, pusher, presence, uploads })
 
 await app.listen({ port: config.port, host: config.host })
 app.log.info(
