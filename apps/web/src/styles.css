@@ -23,8 +23,10 @@
 }
 
 :root {
-  /* Written by useKeyboardInset() from the VisualViewport API. */
+  /* Both written by useKeyboardInset() — one from the VisualViewport API, the
+   * other from window.innerHeight. See that hook for why. */
   --keyboard-inset: 0px;
+  --app-height: 100dvh;
   color-scheme: dark;
 }
 
@@ -44,12 +46,15 @@ body {
 }
 
 /*
- * `100dvh`, never `100vh` — the latter is a lie whenever the virtual keyboard is
- * open. The keyboard's real height comes from the VisualViewport API, and we lift
- * the whole app above it rather than letting content scroll underneath.
+ * Never `100vh` — that's a lie whenever the virtual keyboard is open. `--app-height`
+ * defaults to `100dvh` (see :root) and gets overridden with a JS-measured
+ * `window.innerHeight` once useKeyboardInset() mounts, because installed iOS PWAs
+ * are known to freeze the dvh unit stale (see that hook for details). The
+ * keyboard's own height comes from `--keyboard-inset`, and we lift the whole
+ * app above it rather than letting content scroll underneath.
  */
 .app {
-  height: 100dvh;
+  height: var(--app-height);
   padding-bottom: var(--keyboard-inset);
   transition: padding-bottom 120ms ease-out;
 }

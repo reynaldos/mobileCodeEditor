@@ -81,23 +81,40 @@ export function useEventStream(): { state: State; connection: Connection } {
 /**
  * The virtual keyboard does not resize the layout viewport, so `100vh` is a lie
  * whenever it is open. Track the visual viewport and let CSS use the truth.
+ *
+ * Also measures `window.innerHeight` into `--app-height`, independent of the
+ * keyboard tracking below. An installed (home-screen) iOS PWA is known to
+ * freeze the `100dvh` unit at a stale value — typically whatever it last
+ * measured while the keyboard was open — leaving a dead strip of bare black
+ * background below the app instead of the unit tracking back to the real
+ * full-screen height once the keyboard closes. Writing our own measurement
+ * sidesteps that browser bug; styles.css falls back to `100dvh` until this
+ * effect has run.
  */
 export function useKeyboardInset(): void {
   useEffect(() => {
-    const viewport = window.visualViewport
-    if (!viewport) return
+    const updateAppHeight = (): void => {
+      document.documentElement.style.setProperty('--app-height', `${window.innerHeight}px`)
+    }
+    updateAppHeight()
+    window.addEventListener('resize', updateAppHeight)
+    window.addEventListener('orientationchange', updateAppHeight)
 
-    const update = (): void => {
+    const viewport = window.visualViewport
+    const updateKeyboardInset = (): void => {
+      if (!viewport) return
       const inset = Math.max(0, window.innerHeight - viewport.height - viewport.offsetTop)
       document.documentElement.style.setProperty('--keyboard-inset', `${inset}px`)
     }
+    updateKeyboardInset()
+    viewport?.addEventListener('resize', updateKeyboardInset)
+    viewport?.addEventListener('scroll', updateKeyboardInset)
 
-    update()
-    viewport.addEventListener('resize', update)
-    viewport.addEventListener('scroll', update)
     return () => {
-      viewport.removeEventListener('resize', update)
-      viewport.removeEventListener('scroll', update)
+      window.removeEventListener('resize', updateAppHeight)
+      window.removeEventListener('orientationchange', updateAppHeight)
+      viewport?.removeEventListener('resize', updateKeyboardInset)
+      viewport?.removeEventListener('scroll', updateKeyboardInset)
     }
   }, [])
 }
