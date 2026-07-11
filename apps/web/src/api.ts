@@ -3,6 +3,8 @@ import type {
   ApprovalRequest,
   CreateProjectRequest,
   CreateProjectResponse,
+  EnvEntry,
+  EnvFileResponse,
   GithubRepo,
   GithubReposResponse,
   NameCheckResponse,
@@ -165,6 +167,31 @@ export async function decideApproval(
 /** Answer a parked AskUserQuestion. `answers` is keyed by question text. 409 if not pending. */
 export async function answerQuestion(requestId: string, answers: Record<string, string>): Promise<void> {
   await post<void>(`/api/questions/${encodeURIComponent(requestId)}`, { answers } satisfies AnswerQuestionRequest)
+}
+
+const envUrl = (projectId: string): string => `${BASE}/api/projects/${encodeURIComponent(projectId)}/env`
+
+/** The project's .env as key/value entries, plus whether a .env.example exists. */
+export async function fetchEnv(projectId: string): Promise<EnvFileResponse> {
+  const response = await fetch(envUrl(projectId))
+  if (!response.ok) throw new ApiError(response.status, response.statusText)
+  return (await response.json()) as EnvFileResponse
+}
+
+/** A scaffold proposal from .env.example (keys, blank values). Not written until saved. */
+export async function initEnv(projectId: string): Promise<EnvFileResponse> {
+  return (await post<EnvFileResponse>(`/api/projects/${encodeURIComponent(projectId)}/env/init`, {}))!
+}
+
+/** Write the project's .env from these entries. 204 on success. */
+export async function saveEnv(projectId: string, entries: EnvEntry[]): Promise<void> {
+  await expectOk(
+    await fetch(envUrl(projectId), {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ entries }),
+    }),
+  )
 }
 
 /** The server's public VAPID key, fetched at enable time so key rotation is server-only. */

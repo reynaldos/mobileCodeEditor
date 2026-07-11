@@ -1,8 +1,9 @@
 import { LEGACY_THREAD_ID } from '@mce/protocol'
-import { ChevronDown, History, MessageCirclePlus } from 'lucide-react'
+import { ChevronDown, History, KeyRound, MessageCirclePlus } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import { deleteThread, fetchHealth, type Health, renameThread } from './api.ts'
 import { BuildModal } from './components/BuildModal.tsx'
+import { EnvDrawer } from './components/EnvDrawer.tsx'
 import { MessageList } from './components/MessageList.tsx'
 import { NotificationsButton } from './components/NotificationsButton.tsx'
 import { ProjectPicker } from './components/ProjectPicker.tsx'
@@ -39,6 +40,7 @@ export function App(): React.JSX.Element {
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null)
   const [health, setHealth] = useState<Health | undefined>()
   const [overlay, setOverlay] = useState<Overlay>(null)
+  const [envOpen, setEnvOpen] = useState(false)
   const builds = useBuilds(state)
   useKeyboardInset()
 
@@ -123,6 +125,14 @@ export function App(): React.JSX.Element {
               >
                 <MessageCirclePlus className="size-[18px]" />
               </button>
+              <button
+                className="flex items-center text-muted"
+                title="Environment (.env)"
+                aria-label="Environment"
+                onClick={() => setEnvOpen(true)}
+              >
+                <KeyRound className="size-[18px]" />
+              </button>
             </>
           )}
           <NotificationsButton />
@@ -186,6 +196,8 @@ export function App(): React.JSX.Element {
           onClose={() => setOverlay(null)}
         />
       )}
+
+      {activeProjectId && <EnvDrawer projectId={activeProjectId} open={envOpen} onOpenChange={setEnvOpen} />}
 
       {overlay === 'threads' && activeProjectId && (
         <ThreadList

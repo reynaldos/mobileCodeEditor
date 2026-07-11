@@ -316,6 +316,25 @@ export interface AnswerQuestionRequest {
   answers: Record<string, string>
 }
 
+// --- Project .env editor (Phase 2.7) ---------------------------------------
+
+/** One KEY=value line from a project's .env. */
+export interface EnvEntry {
+  key: string
+  value: string
+}
+
+/** GET /api/projects/:id/env — the project's .env, plus whether a .env.example exists. */
+export interface EnvFileResponse {
+  entries: EnvEntry[]
+  hasExample: boolean
+}
+
+/** PUT /api/projects/:id/env — replace the file with these entries. */
+export interface SaveEnvRequest {
+  entries: EnvEntry[]
+}
+
 // --- GitHub integration, for the picker's clone/create forms ---------------
 
 /** A repo the user can clone, from `gh`. Owned repos are prioritized. */
