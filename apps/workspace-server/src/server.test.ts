@@ -181,19 +181,29 @@ test('prompting without a projectId is a 400', async () => {
   assert.match(((await response.json()) as { error: string }).error, /projectId/)
 })
 
+test('prompting without a threadId is a 400', async () => {
+  const { base } = await boot()
+  const response = await fetch(`${base}/api/prompt`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ text: 'hello', projectId: 'app' }),
+  })
+  assert.equal(response.status, 400)
+  assert.match(((await response.json()) as { error: string }).error, /threadId/)
+})
+
 test('prompting an unknown project is a 404', async () => {
   const { base } = await boot()
   const response = await fetch(`${base}/api/prompt`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ text: 'hello', projectId: 'ghost' }),
+    body: JSON.stringify({ text: 'hello', projectId: 'ghost', threadId: 't1' }),
   })
 
   assert.equal(response.status, 404)
 })
 
 test('prompting a real project without a token is a 503 that says what to do', async () => {
-  // Give the projects root one real project so we reach the token check.
   const root = mkdtempSync(join(tmpdir(), 'mce-proot-'))
   mkdirSync(join(root, 'app'))
   execFileSync('git', ['-C', join(root, 'app'), 'init', '-q'])
@@ -202,11 +212,31 @@ test('prompting a real project without a token is a 503 that says what to do', a
   const response = await fetch(`${base}/api/prompt`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ text: 'hello', projectId: 'app' }),
+    body: JSON.stringify({ text: 'hello', projectId: 'app', threadId: 't1' }),
   })
 
   assert.equal(response.status, 503)
   assert.match(((await response.json()) as { error: string }).error, /CLAUDE_CODE_OAUTH_TOKEN/)
+})
+
+test('threads: new thread then list it', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'mce-proot-'))
+  mkdirSync(join(root, 'app'))
+  execFileSync('git', ['-C', join(root, 'app'), 'init', '-q'])
+  const { base, log } = await boot({ ...DEV, projectsRoot: root })
+
+  const created = await fetch(`${base}/api/projects/app/threads`, { method: 'POST' })
+  assert.equal(created.status, 201)
+  const { threadId } = (await created.json()) as { threadId: string }
+
+  // A thread only appears once it has an event — seed one directly.
+  log.append({ sessionId: 's', projectId: 'app', threadId, ts: 1, type: 'user_prompt', text: 'add a title here' })
+
+  const list = (await (await fetch(`${base}/api/projects/app/threads`)).json()) as { threads: Array<{ id: string; title: string }> }
+  assert.equal(list.threads.length, 1)
+  assert.equal(list.threads[0]?.id, threadId)
+  // Titleized from the first prompt: sentence-cased, filler stripped.
+  assert.equal(list.threads[0]?.title, 'Add a title here')
 })
 
 test('github routes 503 when gh is not configured (boot default)', async () => {

@@ -441,3 +441,27 @@ on first boot.
 **Would change our mind:** going truly multi-tenant re-opens all of this — per-user Machines,
 a control plane in front, and the Tailscale-per-container model gives way to a real ingress.
 That's [#13](#13-single-tenant-and-multi-tenancy-would-live-in-front), still a different product.
+
+---
+
+## 22. No emoji in the UI — lucide-react icons
+
+A rule, set after emoji had crept into the header and buttons (🔔, 🕘) and glyph
+chevrons (▾ ‹ ›) stood in for icons.
+
+**Never use emoji, or unicode symbol glyphs, as UI** — buttons, labels, status,
+affordances. Emoji render differently on every platform and font, can't take a
+color/size/stroke to match the design, and read as unfinished. Reach for
+[lucide-react](https://lucide.dev) instead: consistent SVG icons that inherit
+`currentColor` and size cleanly (`className="size-4"`).
+
+```tsx
+import { Bell, History, ChevronDown } from 'lucide-react'
+<Bell className="size-4" />
+```
+
+**Fine to keep:** typographic ellipses (`…`) for truncation and the diff gap
+marker — those are text, not icons. The rule is about icon/affordance glyphs.
+
+**Would change our mind:** nothing foreseeable. If an icon is missing from lucide,
+add an inline SVG that follows the same `currentColor` + size conventions.

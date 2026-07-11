@@ -13,15 +13,16 @@ It works, on-device, off the laptop. You direct Claude from your phone, approve 
 your thumb, get pushed when it needs you, and it commits and pushes to GitHub **as you** —
 against a container on Fly.io that never sleeps.
 
-Shipped: Phase 0 (the one-screen MVP, on-device acceptance passed), a New conversation button,
-Phase 1 (web push, on-device), the Tailwind 4 migration, containerization, the Fly deploy
-(Tailscale in-container, nothing public, no server auth), CI/CD (push to main → test →
-deploy), and **Phase 2 — projects** (multi-repo clone/create/switch, built and verified
-locally; on-device test pending). 90 tests pass.
+Shipped: Phase 0 (the one-screen MVP, on-device acceptance passed), Phase 1 (web push,
+on-device), the Tailwind 4 migration, containerization, the Fly deploy (Tailscale
+in-container, nothing public, no server auth), CI/CD (push to main → test → deploy),
+**Phase 2 — projects** (multi-repo clone/create/switch), and **Phase 2.5 — threads**
+(per-project conversation history with native-resume/recap). The last two are built and
+verified locally; on-device test pending. 104 tests pass.
 
-**Next:** the on-device test of Phase 2 (clone a second repo from the phone), then Phase 3
-(files + editor) or Phase 5 (preview). The full picture, milestones, and reasoning are in
-**[docs/ROADMAP.md](docs/ROADMAP.md)**.
+**Next:** the on-device test of Phase 2 + 2.5 (clone a second repo and hold two threads from
+the phone), then Phase 3 (files + editor) or Phase 5 (preview). The full picture, milestones,
+and reasoning are in **[docs/ROADMAP.md](docs/ROADMAP.md)**.
 
 Deploy runbooks: **[docs/DEPLOY-FLY.md](docs/DEPLOY-FLY.md)** (what's running) and
 [docs/DEPLOY-ORACLE.md](docs/DEPLOY-ORACLE.md) (the free-tier alternative we tried first).

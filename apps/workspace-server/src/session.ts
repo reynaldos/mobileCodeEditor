@@ -48,10 +48,18 @@ export interface AgentSessionOptions {
   readonly config: Config
   /** Which project this session works in. Every event it appends is tagged with it. */
   readonly projectId: string
+  /** Which thread within the project. Every event is tagged with it too. */
+  readonly threadId: string
   /** The project's directory — the agent's `cwd`. */
   readonly projectPath: string
-  /** A Claude session id from a previous, interrupted run. */
+  /** A Claude session id to natively resume — when its transcript still exists. */
   readonly resume?: string
+  /**
+   * A recap of the thread so far, folded into the FIRST prompt so Claude has
+   * context without a native resume. See PHASE-2.5 option C. Mutually exclusive
+   * with `resume` in practice — you use one or the other.
+   */
+  readonly recap?: string
   /** Injected in tests. Defaults to the real SDK. */
   readonly queryFn?: QueryFn
 }
@@ -59,11 +67,13 @@ export interface AgentSessionOptions {
 export class AgentSession {
   readonly id: string
   readonly projectId: string
+  readonly threadId: string
 
   readonly #log: EventLog
   readonly #config: Config
   readonly #projectPath: string
   readonly #resume: string | undefined
+  #recap: string | undefined
   readonly #queryFn: QueryFn
 
   readonly #queue = new AsyncQueue<SDKUserMessage>()
@@ -80,10 +90,12 @@ export class AgentSession {
   constructor(opts: AgentSessionOptions) {
     this.id = opts.id
     this.projectId = opts.projectId
+    this.threadId = opts.threadId
     this.#log = opts.log
     this.#config = opts.config
     this.#projectPath = opts.projectPath
     this.#resume = opts.resume
+    this.#recap = opts.recap
     this.#queryFn = opts.queryFn ?? query
   }
 
@@ -127,11 +139,17 @@ export class AgentSession {
     if (!this.#query) throw new Error('session not started')
     if (this.#queue.closed) throw new Error('session is closing')
 
+    // Log the user's real text — that's what the UI shows. Claude receives the
+    // recap folded in ahead of it, but only on the first prompt of a recapped
+    // thread, so it has context without a native resume. See PHASE-2.5.
     this.#append({ type: 'user_prompt', text })
+    const toClaude = this.#recap ? `${this.#recap}\n\n---\n\n${text}` : text
+    this.#recap = undefined
+
     this.#status = 'thinking'
     this.#queue.push({
       type: 'user',
-      message: { role: 'user', content: text },
+      message: { role: 'user', content: toClaude },
       parent_tool_use_id: null,
     })
   }
@@ -344,6 +362,7 @@ export class AgentSession {
     this.#log.append({
       sessionId: this.id,
       projectId: this.projectId,
+      threadId: this.threadId,
       ts: Date.now(),
       ...body,
     } as NewEvent)

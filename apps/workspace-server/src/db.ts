@@ -42,6 +42,13 @@ const MIGRATIONS: readonly string[] = [
     last_ok_at INTEGER
   );
   `,
+  // Migration #3: threads (Phase 2.5). Additive — a nullable column, so it applies
+  // on boot with nothing to backfill. Legacy events keep thread_id = NULL and show
+  // as one "Earlier conversation" thread per project. See PHASE-2.5.md.
+  `
+  ALTER TABLE events ADD COLUMN thread_id TEXT;
+  CREATE INDEX events_thread ON events (project_id, thread_id, seq);
+  `,
 ]
 
 export function openDb(path: string): Db {

@@ -5,10 +5,14 @@ import type {
   GithubRepo,
   GithubReposResponse,
   NameCheckResponse,
+  NewThreadResponse,
   Project,
   ProjectsResponse,
   PromptRequest,
   PromptResponse,
+  RenameThreadRequest,
+  Thread,
+  ThreadsResponse,
 } from '@mce/protocol'
 
 /**
@@ -49,20 +53,46 @@ async function post<T>(path: string, body: unknown): Promise<T | undefined> {
 }
 
 /** 202. The answer arrives over SSE, not in this response. */
-export async function sendPrompt(text: string, projectId: string, fresh?: boolean): Promise<PromptResponse> {
-  return (await post<PromptResponse>('/api/prompt', {
-    text,
-    projectId,
-    ...(fresh ? { fresh } : {}),
-  } satisfies PromptRequest))!
+export async function sendPrompt(text: string, projectId: string, threadId: string): Promise<PromptResponse> {
+  return (await post<PromptResponse>('/api/prompt', { text, projectId, threadId } satisfies PromptRequest))!
 }
 
-/**
- * Ends the project's live session and draws a line in the log. The next prompt
- * to it starts a conversation Claude has no memory of.
- */
-export async function startNewConversation(projectId: string): Promise<void> {
-  await post<void>('/api/conversations/new', { projectId })
+/** The project's threads, newest activity first. */
+export async function fetchThreads(projectId: string): Promise<Thread[]> {
+  const response = await fetch(`${BASE}/api/projects/${encodeURIComponent(projectId)}/threads`)
+  if (!response.ok) throw new ApiError(response.status, response.statusText)
+  return ((await response.json()) as ThreadsResponse).threads
+}
+
+/** Mint a fresh thread; returns its id. */
+export async function createThread(projectId: string): Promise<string> {
+  const res = await post<NewThreadResponse>(`/api/projects/${encodeURIComponent(projectId)}/threads`, {})
+  return res!.threadId
+}
+
+const threadUrl = (projectId: string, threadId: string): string =>
+  `${BASE}/api/projects/${encodeURIComponent(projectId)}/threads/${encodeURIComponent(threadId)}`
+
+async function expectOk(response: Response): Promise<void> {
+  if (response.ok) return
+  const detail = await response.json().catch(() => ({}) as { error?: string })
+  throw new ApiError(response.status, detail.error ?? response.statusText)
+}
+
+/** Give a thread a custom title. 204 on success. */
+export async function renameThread(projectId: string, threadId: string, title: string): Promise<void> {
+  await expectOk(
+    await fetch(threadUrl(projectId, threadId), {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ title } satisfies RenameThreadRequest),
+    }),
+  )
+}
+
+/** Hide a thread from the list (the log keeps its events). 204 on success. */
+export async function deleteThread(projectId: string, threadId: string): Promise<void> {
+  await expectOk(await fetch(threadUrl(projectId, threadId), { method: 'DELETE' }))
 }
 
 /** The projects the picker shows. Authoritative — the server reads disk. */

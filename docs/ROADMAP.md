@@ -24,6 +24,7 @@ against a container running on Fly.io that never sleeps, with your laptop closed
 | Deploy to Fly (always-on, Tailscale in-container) | ✅ done, phone-verified |
 | CI/CD — auto-deploy on push to main | ✅ done (push to main → test → deploy) |
 | Phase 2 — projects (multi-repo, clone, picker) | ✅ built + verified locally; on-device test pending |
+| Phase 2.5 — threads (per-project history, resume/recap) | ✅ built + verified locally; on-device test pending |
 | Phase 3 — files + editor · 4 — terminal · 5 — preview · 6 — convenience | ▫️ not started |
 
 **Recommended next steps**, in order:

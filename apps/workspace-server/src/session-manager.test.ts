@@ -31,49 +31,62 @@ const init = (sessionId: string): SDKMessage =>
 const done = (): SDKMessage =>
   ({ type: 'result', subtype: 'success', total_cost_usd: 0, num_turns: 1 }) as unknown as SDKMessage
 
-/** Records the `resume` option every started session was given. */
+/** Records the `resume` option AND the prompt text each started session received. */
 function recordingQuery(claudeSessionIds: string[]): {
   queryFn: QueryFn
   resumes: Array<string | undefined>
+  firstPrompts: string[]
 } {
   const resumes: Array<string | undefined> = []
+  const firstPrompts: string[] = []
   let n = 0
 
-  const queryFn = ((params: { prompt: AsyncIterable<unknown>; options: { resume?: string } }) => {
+  const queryFn = ((params: { prompt: AsyncIterable<{ message: { content: string } }>; options: { resume?: string } }) => {
     resumes.push(params.options.resume)
     const claudeSessionId = claudeSessionIds[n++] ?? `claude-${n}`
     return (async function* () {
       yield init(claudeSessionId)
-      for await (const _ of params.prompt) yield done()
+      let first = true
+      for await (const msg of params.prompt) {
+        if (first) {
+          firstPrompts.push(msg.message.content)
+          first = false
+        }
+        yield done()
+      }
     })() as unknown as Query
   }) as unknown as QueryFn
 
-  return { queryFn, resumes }
+  return { queryFn, resumes, firstPrompts }
 }
 
-/** A projects root on disk with the named projects git-init'd, and a manager over it. */
+interface Harness {
+  manager: SessionManager
+  log: EventLog
+  resumes: Array<string | undefined>
+  firstPrompts: string[]
+}
+
+/** A projects root on disk with the named projects git-init'd. `sessionExists`
+ *  controls native-resume vs recap (default: never native → always recap/fresh). */
 function harness(
   projectIds: string[],
   claudeSessionIds: string[],
-): { manager: SessionManager; log: EventLog; resumes: Array<string | undefined> } {
+  sessionExists: (id: string) => boolean = () => false,
+): Harness {
   const root = mkdtempSync(join(tmpdir(), 'mce-projects-'))
   for (const id of projectIds) {
     const dir = join(root, id)
     mkdirSync(dir)
     execFileSync('git', ['-C', dir, 'init', '-q', '-b', 'main'])
   }
-  const config: Config = {
-    ...BASE,
-    projectsRoot: root,
-    projectPath: join(root, projectIds[0] ?? 'app'),
-    projectId: projectIds[0] ?? 'app',
-  }
+  const config: Config = { ...BASE, projectsRoot: root, projectPath: join(root, projectIds[0] ?? 'app'), projectId: projectIds[0] ?? 'app' }
 
   const log = new EventLog(openDb(':memory:'), makeRedactor([]))
   const projects = new ProjectStore(root, log)
-  const { queryFn, resumes } = recordingQuery(claudeSessionIds)
-  const manager = new SessionManager(log, config, projects, queryFn)
-  return { manager, log, resumes }
+  const { queryFn, resumes, firstPrompts } = recordingQuery(claudeSessionIds)
+  const manager = new SessionManager(log, config, projects, { queryFn, sessionExists })
+  return { manager, log, resumes, firstPrompts }
 }
 
 async function waitFor(predicate: () => boolean, label: string, ms = 2000): Promise<void> {
@@ -84,84 +97,100 @@ async function waitFor(predicate: () => boolean, label: string, ms = 2000): Prom
   }
 }
 
-const startedFor = (log: EventLog, projectId: string): number =>
-  log.replaySince(0).filter((e) => e.type === 'session_started' && e.projectId === projectId).length
+const startedForThread = (log: EventLog, threadId: string): number =>
+  log.replaySince(0).filter((e) => e.type === 'session_started' && e.threadId === threadId).length
 
 // ---------------------------------------------------------------------------
 
-test('the first prompt to a project starts a fresh conversation', async () => {
-  const { manager, log, resumes } = harness(['app'], ['claude-1'])
+test('newThread mints an id; the first prompt starts a fresh session (no resume, no recap)', async () => {
+  const { manager, log, resumes, firstPrompts } = harness(['app'], ['c1'])
+  const t = manager.newThread('app')
 
-  await manager.prompt('app', 'hello')
-  await waitFor(() => startedFor(log, 'app') === 1, 'session_started')
+  await manager.prompt('app', t, 'hello')
+  await waitFor(() => startedForThread(log, t) === 1, 'session_started')
 
   assert.deepEqual(resumes, [undefined])
+  assert.equal(firstPrompts[0], 'hello', 'no recap folded into a brand-new thread')
   await manager.shutdown()
 })
 
-test('prompting an unknown project is an UnknownProjectError', async () => {
-  const { manager } = harness(['app'], ['claude-1'])
-  await assert.rejects(() => manager.prompt('ghost', 'hi'), UnknownProjectError)
+test('newThread on an unknown project throws', () => {
+  const { manager } = harness(['app'], ['c1'])
+  assert.throws(() => manager.newThread('ghost'), UnknownProjectError)
+})
+
+test('two threads in one project stay isolated, each tagged with its own id', async () => {
+  const { manager, log } = harness(['app'], ['ca', 'cb'])
+  const a = manager.newThread('app')
+  const b = manager.newThread('app')
+
+  await manager.prompt('app', a, 'work on A')
+  await manager.prompt('app', b, 'work on B')
+  await waitFor(() => startedForThread(log, a) === 1 && startedForThread(log, b) === 1, 'both')
+
+  const aEvents = log.replaySince(0).filter((e) => e.threadId === a)
+  const bEvents = log.replaySince(0).filter((e) => e.threadId === b)
+  assert.ok(aEvents.some((e) => e.type === 'user_prompt' && e.text === 'work on A'))
+  assert.ok(bEvents.some((e) => e.type === 'user_prompt' && e.text === 'work on B'))
+  assert.ok(!aEvents.some((e) => e.type === 'user_prompt' && e.text === 'work on B'), 'no cross-talk')
   await manager.shutdown()
 })
 
-test('two projects run isolated sessions — the whole point of Phase 2', async () => {
-  const { manager, log } = harness(['alpha', 'beta'], ['claude-a', 'claude-b'])
+test('a second prompt to the same thread feeds the live session', async () => {
+  const { manager, log, resumes } = harness(['app'], ['c1'])
+  const t = manager.newThread('app')
 
-  await manager.prompt('alpha', 'work on alpha')
-  await manager.prompt('beta', 'work on beta')
-  await waitFor(() => startedFor(log, 'alpha') === 1 && startedFor(log, 'beta') === 1, 'both sessions')
+  const s1 = await manager.prompt('app', t, 'one')
+  await waitFor(() => startedForThread(log, t) === 1, 'session')
+  const s2 = await manager.prompt('app', t, 'two')
 
-  const alpha = log.replaySince(0).filter((e) => e.projectId === 'alpha')
-  const beta = log.replaySince(0).filter((e) => e.projectId === 'beta')
-  assert.ok(alpha.some((e) => e.type === 'user_prompt' && e.text === 'work on alpha'))
-  assert.ok(beta.some((e) => e.type === 'user_prompt' && e.text === 'work on beta'))
-  assert.ok(!alpha.some((e) => e.type === 'user_prompt' && e.text === 'work on beta'), 'no cross-talk')
-
-  await manager.shutdown()
-})
-
-test('a second prompt to the same project feeds the live session', async () => {
-  const { manager, log, resumes } = harness(['app'], ['claude-1'])
-
-  const a = await manager.prompt('app', 'one')
-  await waitFor(() => startedFor(log, 'app') === 1, 'session')
-  const b = await manager.prompt('app', 'two')
-
-  assert.equal(a, b, 'same session id')
+  assert.equal(s1, s2, 'same session id')
   assert.equal(resumes.length, 1, 'query() called once')
   await manager.shutdown()
 })
 
-test('each project resumes its own last conversation', async () => {
-  const { manager, log } = harness(['alpha', 'beta'], ['claude-a', 'claude-b'])
-  await manager.prompt('alpha', 'a')
-  await manager.prompt('beta', 'b')
-  await waitFor(() => startedFor(log, 'alpha') === 1 && startedFor(log, 'beta') === 1, 'both')
+test('continuing a cold thread NATIVELY resumes when the transcript still exists', async () => {
+  // sessionExists → true: native resume, no recap.
+  const { manager, log, resumes, firstPrompts } = harness(['app'], ['c1', 'c1'], () => true)
+  const t = manager.newThread('app')
 
-  assert.equal(manager.resumableConversationIdOf('alpha'), 'claude-a')
-  assert.equal(manager.resumableConversationIdOf('beta'), 'claude-b')
+  await manager.prompt('app', t, 'first')
+  await waitFor(() => startedForThread(log, t) === 1, 'first session')
+  // Force the session dead so the next prompt starts a new one (cold path).
+  await manager.shutdown()
+
+  await manager.prompt('app', t, 'again')
+  await waitFor(() => startedForThread(log, t) === 2, 'resumed session')
+
+  assert.equal(resumes[1], 'c1', 'native resume with the thread claude id')
+  assert.equal(firstPrompts[1], 'again', 'no recap folded in when resuming natively')
   await manager.shutdown()
 })
 
-test('a reset is per-project: that project resumes nothing, the other is untouched', async () => {
-  const { manager, log } = harness(['alpha', 'beta'], ['claude-a', 'claude-b'])
+test('continuing a cold thread RECAPS when the transcript is gone', async () => {
+  // sessionExists → false: no native resume; recap from the log instead.
+  const { manager, log, resumes, firstPrompts } = harness(['app'], ['c1', 'c2'], () => false)
+  const t = manager.newThread('app')
 
-  await manager.prompt('alpha', 'a')
-  await manager.prompt('beta', 'b')
-  await waitFor(() => startedFor(log, 'alpha') === 1 && startedFor(log, 'beta') === 1, 'both')
+  await manager.prompt('app', t, 'refactor the auth flow')
+  await waitFor(() => startedForThread(log, t) === 1, 'first session')
+  await manager.shutdown()
 
-  await manager.newConversation('alpha')
+  await manager.prompt('app', t, 'keep going')
+  await waitFor(() => startedForThread(log, t) === 2, 'recapped session')
 
-  assert.equal(manager.resumableConversationIdOf('alpha'), undefined, 'alpha reset')
-  assert.equal(manager.resumableConversationIdOf('beta'), 'claude-b', 'beta untouched')
+  assert.equal(resumes[1], undefined, 'no native resume')
+  const recapped = firstPrompts[1] ?? ''
+  assert.match(recapped, /recap/i, 'a recap was folded in')
+  assert.match(recapped, /refactor the auth flow/, 'the recap includes the earlier prompt')
+  assert.match(recapped, /keep going$/, 'the real prompt follows the recap')
   await manager.shutdown()
 })
 
 test('recoverOnBoot closes open sessions and expires parked approvals', async () => {
-  const { manager, log } = harness(['app'], ['claude-1'])
-  const at = { sessionId: 's-old', projectId: 'app', ts: 1 } as const
-  log.append({ ...at, type: 'session_started', claudeSessionId: 'claude-1', model: 'opus' })
+  const { manager, log } = harness(['app'], ['c1'])
+  const at = { sessionId: 's-old', projectId: 'app', threadId: 't-old', ts: 1 } as const
+  log.append({ ...at, type: 'session_started', claudeSessionId: 'c1', model: 'opus' })
   log.append({ ...at, type: 'approval_request', approvalId: 'a1', toolUseId: 't1', tool: 'Edit', input: {} })
 
   manager.recoverOnBoot()
@@ -173,7 +202,7 @@ test('recoverOnBoot closes open sessions and expires parked approvals', async ()
 })
 
 test('resolveApproval on an unknown id is not_pending', async () => {
-  const { manager } = harness(['app'], ['claude-1'])
+  const { manager } = harness(['app'], ['c1'])
   assert.equal(manager.resolveApproval('ghost', true), 'not_pending')
   await manager.shutdown()
 })

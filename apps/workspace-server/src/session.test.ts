@@ -61,6 +61,7 @@ function makeSession(queryFn: QueryFn): { session: AgentSession; log: EventLog }
     log,
     config: CONFIG,
     projectId: 'test',
+    threadId: 'th1',
     projectPath: CONFIG.projectPath,
     queryFn,
   })

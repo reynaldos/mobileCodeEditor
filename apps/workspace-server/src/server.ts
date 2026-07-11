@@ -9,13 +9,13 @@ import type { ProjectStore } from './projects.ts'
 import type { Pusher } from './push.ts'
 import type { PushStore } from './push-store.ts'
 import { registerApprovals } from './routes/approvals.ts'
-import { registerConversations } from './routes/conversations.ts'
 import { registerDebug } from './routes/debug.ts'
 import { registerEvents } from './routes/events.ts'
 import { registerGithub } from './routes/github.ts'
 import { registerProjects } from './routes/projects.ts'
 import { registerPrompt } from './routes/prompt.ts'
 import { registerPush } from './routes/push.ts'
+import { registerThreads } from './routes/threads.ts'
 import type { SessionManager } from './session-manager.ts'
 
 export interface Services {
@@ -52,10 +52,10 @@ export async function buildServer(config: Config, services: Services): Promise<F
 
   registerEvents(app, log, config)
   registerProjects(app, projects)
+  registerThreads(app, log, projects, sessions)
   registerGithub(app, projects, github)
   registerPrompt(app, sessions)
   registerApprovals(app, sessions)
-  registerConversations(app, sessions)
   registerPush(app, config, pushStore, pusher)
   registerDebug(app, log, config)
 

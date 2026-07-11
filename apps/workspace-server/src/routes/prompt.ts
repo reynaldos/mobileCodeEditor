@@ -1,4 +1,4 @@
-import type { PromptRequest, PromptResponse } from '@mce/protocol'
+import { LEGACY_THREAD_ID, type PromptRequest, type PromptResponse } from '@mce/protocol'
 import type { FastifyInstance } from 'fastify'
 import { SessionManager, UnknownProjectError } from '../session-manager.ts'
 
@@ -11,13 +11,17 @@ export function registerPrompt(app: FastifyInstance, sessions: SessionManager): 
     const body = request.body as Partial<PromptRequest> | undefined
     const text = body?.text?.trim()
     const projectId = body?.projectId?.trim()
+    const threadId = body?.threadId?.trim()
 
     if (!text) return reply.code(400).send({ error: 'text is required' })
     if (!projectId) return reply.code(400).send({ error: 'projectId is required' })
+    if (!threadId) return reply.code(400).send({ error: 'threadId is required' })
+    if (threadId === LEGACY_THREAD_ID) {
+      return reply.code(400).send({ error: 'the earlier conversation is read-only — start a new thread' })
+    }
 
     try {
-      // Continues that project's last conversation unless told not to.
-      const sessionId = await sessions.prompt(projectId, text, { fresh: body?.fresh === true })
+      const sessionId = await sessions.prompt(projectId, threadId, text)
       return reply.code(202).send({ sessionId } satisfies PromptResponse)
     } catch (err) {
       if (err instanceof UnknownProjectError) {
