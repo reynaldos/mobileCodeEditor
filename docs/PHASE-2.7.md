@@ -21,25 +21,42 @@ treats every non-auto tool identically: it appends one `approval_request` and pa
 allow/deny promise. An `AskUserQuestion` call would show up as a generic approval card with the
 questions JSON in a `<pre>` — allow/deny, no way to actually answer.
 
-**Approach.**
-- *Server*: special-case `toolName === 'AskUserQuestion'` in `#canUseTool`. Emit a new
-  `question_request { requestId, questions }` event and park a promise in a `#pendingQuestions`
-  map (parallel to `#pending` approvals). New route `POST /api/questions/:id` `{ answers }`
-  resolves it.
-- *Protocol*: `question_request` / `question_answered` events; `Question` / `QuestionOption`
-  types mirroring the tool schema.
-- *Client*: new `question` item kind in the reducer; a `QuestionCard` component (tabs/segments
-  like the native Claude Code card, options with description, single/multi select, Submit);
-  `api.answerQuestion(id, answers)`.
+**Spike result (done — the plan changed).** It is **not** `canUseTool`. The SDK
+(`@anthropic-ai/claude-agent-sdk@0.3.206`) routes blocking user dialogs, `AskUserQuestion`
+included, through a dedicated callback:
 
-**Open / must-verify (this gates the whole item — treat like the Phase 0 `canUseTool` null
-spike).** How does the Agent SDK want `AskUserQuestion` answered? `canUseTool` returns a
-`PermissionResult` (allow/deny + `updatedInput`), not a tool result. Need to confirm empirically
-whether returning `{ behavior:'allow', updatedInput: <questions with the selected option marked>
-}` makes the SDK produce the right tool_result, or whether there's a dedicated answer channel.
-**Do this spike first**; the rest is straightforward once the resolution shape is known.
+- `options.onUserDialog?: (request, { signal }) => Promise<UserDialogResult>` handles
+  `request_user_dialog` control requests. `UserDialogRequest = { dialogKind: string; payload:
+  Record<string,unknown>; toolUseID? }`; `UserDialogResult = { behavior:'completed'; result:
+  unknown } | { behavior:'cancelled' }`.
+- `options.supportedDialogKinds?: string[]` **gates it**: the CLI fails closed and only emits a
+  `dialogKind` you've declared — undeclared kinds degrade to their no-dialog default
+  (auto-continue/cancel) and never reach the host. So we must declare the right kind.
+- The question schema (`AskUserQuestionInput`) is exactly this repo's `AskUserQuestion` shape:
+  `{ questions: [{ question, header, options:[{label,description,preview?}], multiSelect }] }`
+  (1–4 questions, 2–4 options). The result (`AskUserQuestionOutput`) is `{ questions, answers:
+  { <questionText>: <answerLabel, comma-joined if multi> }, response?, annotations? }`.
+- Config knobs: `askUserQuestionTimeout` (default `'never'` → parks indefinitely, good — no
+  spurious auto-resolve) and `toolConfig.askUserQuestion.previewFormat: 'markdown' | 'html'`
+  (use `'html'` for a web UI if we ever render option previews).
 
-**Size.** M–L (spike-gated).
+**One unknown left — the exact `dialogKind` string** (the type is an open union; only
+`'refusal_fallback_prompt'` is named). Resolve it the Phase-0 way: wire `onUserDialog` to **log
+every incoming `dialogKind` + payload**, declare a small candidate set in `supportedDialogKinds`,
+run one real question on-device, then lock the string in.
+
+**Approach (revised).**
+- *Server*: set `onUserDialog` + `supportedDialogKinds` in the `query()` options
+  ([session.ts](../apps/workspace-server/src/session.ts)). The handler appends a
+  `question_request { requestId, toolUseId, questions }` event and parks a promise (mirrors the
+  approval bridge's `#pending`/`resolveApproval`). `POST /api/questions/:id { answers }` resolves
+  to `{ behavior:'completed', result:{ answers } }`; abort/shutdown resolves `{ behavior:'cancelled' }`.
+- *Protocol*: `question_request` / `question_answered` events; `Question`/`QuestionOption` types.
+- *Client*: a `question` item kind + `QuestionCard` (segmented like the native card, options with
+  descriptions, single/multi select, Submit); `api.answerQuestion(id, answers)`.
+
+**Size.** M–L. Build it discovery-friendly (log the dialogKind) so the one live unknown resolves
+on first use rather than blocking the build.
 
 ---
 
