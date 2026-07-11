@@ -1,5 +1,5 @@
 import { LEGACY_THREAD_ID } from '@mce/protocol'
-import { ChevronDown, History, MessageSquarePlus } from 'lucide-react'
+import { ChevronDown, History, SquarePen } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import { deleteThread, fetchHealth, type Health, renameThread } from './api.ts'
 import { MessageList } from './components/MessageList.tsx'
@@ -100,6 +100,14 @@ export function App(): React.JSX.Element {
             <>
               <button
                 className="flex items-center text-muted"
+                title="Previous threads"
+                aria-label="Previous threads"
+                onClick={() => setOverlay((o) => (o === 'threads' ? null : 'threads'))}
+              >
+                <History className="size-[18px]" />
+              </button>
+              <button
+                className="flex items-center text-muted"
                 title="New thread"
                 aria-label="New thread"
                 onClick={() => {
@@ -107,15 +115,7 @@ export function App(): React.JSX.Element {
                   setOverlay(null)
                 }}
               >
-                <MessageSquarePlus className="size-[18px]" />
-              </button>
-              <button
-                className="flex items-center text-muted"
-                title="Previous threads"
-                aria-label="Previous threads"
-                onClick={() => setOverlay((o) => (o === 'threads' ? null : 'threads'))}
-              >
-                <History className="size-[18px]" />
+                <SquarePen className="size-[18px]" />
               </button>
             </>
           )}
