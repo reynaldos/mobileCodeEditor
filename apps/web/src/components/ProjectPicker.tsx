@@ -1,6 +1,8 @@
+import type { GithubRepo, NameCheckResponse, Visibility } from '@mce/protocol'
 import type { Project } from '@mce/protocol'
-import { useState } from 'react'
-import { ApiError, createProject } from '../api.ts'
+import { useEffect, useState } from 'react'
+import { ApiError, checkProjectName, createProject, fetchGithubRepos } from '../api.ts'
+import { useDebounced } from '../useDebounced.ts'
 
 interface Props {
   projects: Project[]
@@ -13,8 +15,7 @@ interface Props {
 
 /**
  * A full-screen overlay, not a router — Phase 2's IA is still "one screen plus a
- * picker". Tap a project to switch to it; add one by pasting a GitHub URL or
- * naming a fresh repo.
+ * picker". Tap a project to switch; add one via the Clone or Create tab below.
  */
 export function ProjectPicker({ projects, activeId, failed, onSelect, onClose }: Props): React.JSX.Element {
   return (
@@ -52,63 +53,223 @@ export function ProjectPicker({ projects, activeId, failed, onSelect, onClose }:
           )}
         </ul>
 
-        <NewProjectForm failed={failed} />
+        <AddProject failed={failed} />
       </div>
     </div>
   )
 }
 
+type Mode = 'clone' | 'create'
+
+const TAB = 'flex-1 rounded-lg border py-2 text-[13px] font-medium'
+
+function AddProject({ failed }: { failed: Record<string, string> }): React.JSX.Element {
+  const [mode, setMode] = useState<Mode>('clone')
+
+  return (
+    <div className="mt-6 border-t border-line pt-4">
+      <div className="mb-3 flex gap-2">
+        <button
+          className={`${TAB} ${mode === 'clone' ? 'border-accent bg-panel text-fg' : 'border-line bg-panel-2 text-muted'}`}
+          onClick={() => setMode('clone')}
+        >
+          Clone repo
+        </button>
+        <button
+          className={`${TAB} ${mode === 'create' ? 'border-accent bg-panel text-fg' : 'border-line bg-panel-2 text-muted'}`}
+          onClick={() => setMode('create')}
+        >
+          Create repo
+        </button>
+      </div>
+
+      {mode === 'clone' ? <CloneForm failed={failed} /> : <CreateForm failed={failed} />}
+    </div>
+  )
+}
+
+const INPUT =
+  'min-h-11 w-full rounded-xl border border-line bg-panel-2 px-3 text-[16px] text-fg outline-none focus:border-accent'
+
 /**
- * Paste a GitHub URL (clone) or a name (fresh repo). Create returns 202; the
- * project appears in the list above when its `project_created` event lands, which
- * is why the parent refetches on that signal. Errors show as `failed[name]`.
+ * Type to search your repos (owned first) or paste any git URL. A clone returns
+ * 202; the project appears in the list above when its `project_created` lands.
  */
-function NewProjectForm({ failed }: { failed: Record<string, string> }): React.JSX.Element {
-  const [value, setValue] = useState('')
+function CloneForm({ failed }: { failed: Record<string, string> }): React.JSX.Element {
+  const [query, setQuery] = useState('')
+  const [repos, setRepos] = useState<GithubRepo[]>([])
   const [pending, setPending] = useState<string | undefined>()
   const [error, setError] = useState<string | undefined>()
+  const debounced = useDebounced(query, 300)
 
-  // A clone that failed clears the pending spinner.
+  useEffect(() => {
+    let cancelled = false
+    const q = debounced.trim()
+    // A pasted URL isn't a search — no suggestions for it.
+    if (!q || /^(https?:\/\/|git@|ssh:\/\/)/.test(q)) {
+      setRepos([])
+      return
+    }
+    void fetchGithubRepos(q)
+      .then((r) => !cancelled && setRepos(r))
+      .catch(() => !cancelled && setRepos([]))
+    return () => {
+      cancelled = true
+    }
+  }, [debounced])
+
   const pendingError = pending ? failed[pending] : undefined
 
-  async function submit(): Promise<void> {
-    const v = value.trim()
-    if (!v) return
+  async function clone(repoUrl: string): Promise<void> {
     setError(undefined)
-
-    const isUrl = /^(https?:\/\/|git@|ssh:\/\/)/.test(v)
     try {
-      const { projectId } = await createProject(isUrl ? { repoUrl: v } : { name: v })
-      setPending(projectId) // spinner until it shows up in the list, or fails
-      setValue('')
+      const { projectId } = await createProject({ repoUrl })
+      setPending(projectId)
+      setQuery('')
+      setRepos([])
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : String(err))
+    }
+  }
+
+  const isUrl = /^(https?:\/\/|git@|ssh:\/\/)/.test(query.trim())
+
+  return (
+    <div>
+      <div className="flex gap-2">
+        <input
+          className={INPUT}
+          value={query}
+          placeholder="search your repos, or paste a git URL"
+          onChange={(e) => setQuery(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && isUrl && void clone(query.trim())}
+        />
+        {isUrl && (
+          <button
+            className="min-h-11 shrink-0 rounded-xl border border-accent bg-accent px-4 font-semibold text-[#06101f]"
+            onClick={() => void clone(query.trim())}
+          >
+            Clone
+          </button>
+        )}
+      </div>
+
+      {repos.length > 0 && (
+        <ul className="mt-2 flex flex-col gap-1">
+          {repos.map((r) => (
+            <li key={r.nameWithOwner}>
+              <button
+                className="flex w-full items-center justify-between rounded-lg border border-line bg-panel-2 px-3 py-2 text-left"
+                onClick={() => void clone(r.cloneUrl)}
+              >
+                <span className="min-w-0">
+                  <span className="block truncate text-[14px]">{r.nameWithOwner}</span>
+                  {r.description && <span className="block truncate text-[12px] text-muted">{r.description}</span>}
+                </span>
+                <span className="ml-2 shrink-0 text-[11px] text-muted">
+                  {r.isOwn ? 'yours' : ''} {r.private ? '· private' : ''}
+                </span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {pending && !pendingError && <p className="mt-2 text-[13px] text-accent">Cloning {pending}…</p>}
+      {pendingError && <p className="mt-2 text-[13px] text-del">{pending}: {pendingError}</p>}
+      {error && <p className="mt-2 text-[13px] text-del">{error}</p>}
+    </div>
+  )
+}
+
+/**
+ * Name a new repo; we check availability (locally + on GitHub) as you type and
+ * let you pick visibility. Create makes the GitHub repo and clones it.
+ */
+function CreateForm({ failed }: { failed: Record<string, string> }): React.JSX.Element {
+  const [name, setName] = useState('')
+  const [visibility, setVisibility] = useState<Visibility>('private')
+  const [check, setCheck] = useState<NameCheckResponse | null>(null)
+  const [checking, setChecking] = useState(false)
+  const [pending, setPending] = useState<string | undefined>()
+  const [error, setError] = useState<string | undefined>()
+  const debounced = useDebounced(name, 400)
+
+  useEffect(() => {
+    let cancelled = false
+    const n = debounced.trim()
+    setCheck(null)
+    if (!n) return
+    setChecking(true)
+    void checkProjectName(n)
+      .then((res) => !cancelled && setCheck(res))
+      .catch(() => !cancelled && setCheck(null))
+      .finally(() => !cancelled && setChecking(false))
+    return () => {
+      cancelled = true
+    }
+  }, [debounced])
+
+  const pendingError = pending ? failed[pending] : undefined
+  // With GitHub off, check is null — allow create (it becomes a local init server-side).
+  const canCreate = Boolean(name.trim()) && (check === null || check.available)
+
+  async function create(): Promise<void> {
+    setError(undefined)
+    try {
+      const { projectId } = await createProject({ name: name.trim(), visibility })
+      setPending(projectId)
+      setName('')
     } catch (err) {
       setError(err instanceof ApiError ? err.message : String(err))
     }
   }
 
   return (
-    <div className="mt-6 border-t border-line pt-4">
-      <p className="mb-2 text-[13px] text-muted">Add a project — a GitHub URL to clone, or a name for a fresh repo.</p>
-      <div className="flex gap-2">
-        <input
-          className="min-h-11 flex-1 rounded-xl border border-line bg-panel-2 px-3 text-[16px] text-fg outline-none focus:border-accent"
-          value={value}
-          placeholder="github.com/you/repo  ·  or  my-idea"
-          onChange={(e) => setValue(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && void submit()}
-        />
+    <div>
+      <input
+        className={INPUT}
+        value={name}
+        placeholder="new-repo-name"
+        onChange={(e) => setName(e.target.value)}
+      />
+
+      <div className="mt-1 min-h-[18px] text-[12px]">
+        {checking && <span className="text-muted">checking…</span>}
+        {!checking && check?.available && <span className="text-add">available — {check.owner}/{check.name}</span>}
+        {!checking && check && !check.available && (
+          <span className="text-del">
+            {check.reason === 'exists-remote'
+              ? `${check.owner}/${check.name} already exists on GitHub`
+              : check.reason === 'exists-local'
+                ? 'a project with that name already exists here'
+                : 'not a valid name'}
+          </span>
+        )}
+      </div>
+
+      <div className="mt-2 flex items-center gap-2">
+        <div className="flex overflow-hidden rounded-lg border border-line">
+          {(['private', 'public'] as const).map((v) => (
+            <button
+              key={v}
+              className={`px-3 py-2 text-[13px] ${visibility === v ? 'bg-accent text-[#06101f]' : 'bg-panel-2 text-muted'}`}
+              onClick={() => setVisibility(v)}
+            >
+              {v}
+            </button>
+          ))}
+        </div>
         <button
-          className="min-h-11 shrink-0 rounded-xl border border-accent bg-accent px-4 font-semibold text-[#06101f] disabled:opacity-50"
-          disabled={!value.trim()}
-          onClick={() => void submit()}
+          className="min-h-11 flex-1 rounded-xl border border-accent bg-accent font-semibold text-[#06101f] disabled:opacity-50"
+          disabled={!canCreate}
+          onClick={() => void create()}
         >
-          Add
+          Create
         </button>
       </div>
 
-      {pending && !pendingError && (
-        <p className="mt-2 text-[13px] text-accent">Creating {pending}… it&rsquo;ll appear above when ready.</p>
-      )}
+      {pending && !pendingError && <p className="mt-2 text-[13px] text-accent">Creating {pending}…</p>}
       {pendingError && <p className="mt-2 text-[13px] text-del">{pending}: {pendingError}</p>}
       {error && <p className="mt-2 text-[13px] text-del">{error}</p>}
     </div>

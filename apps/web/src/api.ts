@@ -2,6 +2,9 @@ import type {
   ApprovalRequest,
   CreateProjectRequest,
   CreateProjectResponse,
+  GithubRepo,
+  GithubReposResponse,
+  NameCheckResponse,
   Project,
   ProjectsResponse,
   PromptRequest,
@@ -76,6 +79,22 @@ export async function fetchProjects(): Promise<Project[]> {
  */
 export async function createProject(body: CreateProjectRequest): Promise<CreateProjectResponse> {
   return (await post<CreateProjectResponse>('/api/projects', body))!
+}
+
+/** Clone suggestions. Empty when GitHub isn't configured — the field still takes a URL. */
+export async function fetchGithubRepos(q: string): Promise<GithubRepo[]> {
+  const response = await fetch(`${BASE}/api/github/repos?q=${encodeURIComponent(q)}`)
+  if (response.status === 503) return []
+  if (!response.ok) throw new ApiError(response.status, response.statusText)
+  return ((await response.json()) as GithubReposResponse).repos
+}
+
+/** null when GitHub isn't configured — skip the availability UI in that case. */
+export async function checkProjectName(name: string): Promise<NameCheckResponse | null> {
+  const response = await fetch(`${BASE}/api/github/check-name?name=${encodeURIComponent(name)}`)
+  if (response.status === 503) return null
+  if (!response.ok) throw new ApiError(response.status, response.statusText)
+  return (await response.json()) as NameCheckResponse
 }
 
 /** Resolves the promise `canUseTool` is parked on. 409 if already decided or expired. */
