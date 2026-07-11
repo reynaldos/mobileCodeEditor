@@ -1,10 +1,15 @@
 # Phase 2.7 — Control & editor enhancements (backlog + gameplan)
 
-Five enhancements captured for tracking. Not started. Each has: the ask, where the code stands
-today, a proposed approach (server / client / protocol), the open decisions, and rough size.
-Ordering/priority is at the bottom.
+Five enhancements captured for tracking. Each has: the ask, where the code stood, the approach
+taken (server / client / protocol), the decisions, and rough size.
 
-Nothing here is committed to yet — this is the map, not the build.
+**Status — all five built + committed locally (typecheck + tests green).** Two things still need
+an on-device confirmation, both noted inline:
+- **#4** — verify the resolved identity in the boot log reads `reynaldos` (the fix logs it).
+- **#1** — confirm the real `AskUserQuestion` `dialogKind` from the `[dialog] kind=…` server log
+  and trim `QUESTION_DIALOG_KINDS` to it.
+
+The build order below was followed; the original gameplan for each item is kept for the record.
 
 ---
 
