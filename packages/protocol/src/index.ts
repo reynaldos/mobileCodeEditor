@@ -57,6 +57,12 @@ export type EventBody =
   /** One assistant turn finished. The agent is alive and awaiting input. */
   | { type: 'turn_complete'; costUsd?: number; numTurns?: number }
   /**
+   * Files a turn changed, vs the HEAD snapshot taken when the prompt was sent
+   * (Phase 2.7). Names + counts only — bounded, safe for the log; diff bodies are
+   * fetched per file on expand. `base` is the sha to diff against.
+   */
+  | { type: 'turn_changes'; base: string; files: ChangedFile[] }
+  /**
    * A deliberate line under the conversation. Claude will not resume anything
    * before this point.
    *
@@ -252,6 +258,23 @@ export type BuildStreamMessage =
   | { type: 'snapshot'; snapshot: BuildSnapshot }
   | { type: 'line'; line: string }
   | { type: 'phase'; phase: BuildPhase; error?: string; warning?: string }
+
+// --- Turn changes (Phase 2.7): what a turn touched -------------------------
+
+/** One file changed during a turn — names + counts; the diff is fetched per file. */
+export interface ChangedFile {
+  path: string
+  additions: number
+  deletions: number
+  status: 'added' | 'modified' | 'deleted' | 'renamed'
+}
+
+/** GET /api/projects/:id/changes?base=&path= — before/after for one file's diff. */
+export interface FileDiffResponse {
+  path: string
+  before: string
+  after: string
+}
 
 // --- GitHub integration, for the picker's clone/create forms ---------------
 

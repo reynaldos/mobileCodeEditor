@@ -1,4 +1,4 @@
-import { LEGACY_THREAD_ID, type Event } from '@mce/protocol'
+import { LEGACY_THREAD_ID, type ChangedFile, type Event } from '@mce/protocol'
 
 /**
  * A reducer over the event union. Events in, renderable per-thread views out.
@@ -35,6 +35,7 @@ export type Item =
       reason?: string
     }
   | { kind: 'turn'; key: string }
+  | { kind: 'changes'; key: string; base: string; files: ChangedFile[] }
   | { kind: 'ended'; key: string; reason: string; message?: string }
 
 export type AgentState = 'idle' | 'thinking' | 'awaiting_approval' | 'awaiting_input' | 'ended'
@@ -199,6 +200,12 @@ function reduceProject(state: ProjectState, event: Event): ProjectState {
 
     case 'turn_complete':
       return { ...state, agent: 'awaiting_input', items: [...state.items, { kind: 'turn', key }] }
+
+    case 'turn_changes':
+      return {
+        ...state,
+        items: [...state.items, { kind: 'changes', key, base: event.base, files: event.files }],
+      }
 
     /**
      * Clear this project's view. Claude has forgotten the conversation, so

@@ -11,6 +11,7 @@ import { randomUUID } from 'node:crypto'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { AsyncQueue } from './async-queue.ts'
 import { assertAgentCredentials, type Config } from './config.ts'
+import { changedFiles, headSha } from './git-changes.ts'
 import type { EventLog } from './log.ts'
 
 /**
@@ -86,6 +87,8 @@ export class AgentSession {
   #lastCostUsd: number | undefined
   #done: Promise<void> | undefined
   #interruptMessage: string | undefined
+  /** HEAD when the current turn's prompt was sent — the base for its file diff. */
+  #turnBase: Promise<string | undefined> | undefined
 
   constructor(opts: AgentSessionOptions) {
     this.id = opts.id
@@ -145,6 +148,10 @@ export class AgentSession {
     this.#append({ type: 'user_prompt', text })
     const toClaude = this.#recap ? `${this.#recap}\n\n---\n\n${text}` : text
     this.#recap = undefined
+
+    // Snapshot HEAD now so `turn_changes` at the end can diff exactly what this
+    // turn touched, whether Claude commits or leaves it in the working tree.
+    this.#turnBase = headSha(this.#projectPath)
 
     this.#status = 'thinking'
     this.#queue.push({
@@ -336,6 +343,7 @@ export class AgentSession {
           costUsd: message.total_cost_usd,
           numTurns: message.num_turns,
         })
+        void this.#emitTurnChanges(this.#turnBase)
         return
       }
 
@@ -343,6 +351,19 @@ export class AgentSession {
         // The SDKMessage union has ~38 variants. We render five.
         return
     }
+  }
+
+  /**
+   * After a turn, diff the working tree against the HEAD snapshot from when the
+   * prompt was sent and append a `turn_changes` (names + counts only). Off the hot
+   * path and best-effort — a git hiccup must never fail a turn.
+   */
+  async #emitTurnChanges(basePromise?: Promise<string | undefined>): Promise<void> {
+    const base = await basePromise?.catch(() => undefined)
+    if (!base) return
+    const files = await changedFiles(this.#projectPath, base).catch(() => [])
+    if (files.length === 0) return
+    this.#append({ type: 'turn_changes', base, files })
   }
 
   #end(reason: 'complete' | 'error' | 'interrupted', message?: string): void {

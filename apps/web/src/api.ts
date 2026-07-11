@@ -6,6 +6,7 @@ import type {
   GithubReposResponse,
   NameCheckResponse,
   NewThreadResponse,
+  FileDiffResponse,
   Project,
   ProjectsResponse,
   PromptRequest,
@@ -102,6 +103,14 @@ export async function deleteThread(projectId: string, threadId: string): Promise
 /** Abort an in-progress build; the server SIGTERMs the child and cleans up. 202/409. */
 export async function cancelBuild(projectId: string): Promise<void> {
   await expectOk(await fetch(`${BASE}/api/projects/${encodeURIComponent(projectId)}/build/cancel`, { method: 'POST' }))
+}
+
+/** Before/after text for one changed file, for the post-turn diff accordion. */
+export async function fetchFileDiff(projectId: string, base: string, path: string): Promise<FileDiffResponse> {
+  const url = `${BASE}/api/projects/${encodeURIComponent(projectId)}/changes?base=${encodeURIComponent(base)}&path=${encodeURIComponent(path)}`
+  const response = await fetch(url)
+  if (!response.ok) throw new ApiError(response.status, response.statusText)
+  return (await response.json()) as FileDiffResponse
 }
 
 /** The projects the picker shows. Authoritative — the server reads disk. */

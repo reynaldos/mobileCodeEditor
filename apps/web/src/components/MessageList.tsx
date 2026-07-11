@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react'
 import type { Item } from '../events.ts'
 import { relativePath, targetOf } from '../paths.ts'
 import { ApprovalCard } from './ApprovalCard.tsx'
+import { ChangesView } from './ChangesView.tsx'
 
 interface Props {
   items: Item[]
@@ -84,6 +85,9 @@ function Row({ item, projectId }: { item: Item; projectId?: string }): React.JSX
 
     case 'turn':
       return <div className={SEPARATOR}>done</div>
+
+    case 'changes':
+      return <ChangesView base={item.base} files={item.files} projectId={projectId} />
 
     case 'ended':
       return (

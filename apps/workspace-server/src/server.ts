@@ -11,6 +11,7 @@ import type { Pusher } from './push.ts'
 import type { PushStore } from './push-store.ts'
 import { registerApprovals } from './routes/approvals.ts'
 import { registerBuild } from './routes/build.ts'
+import { registerChanges } from './routes/changes.ts'
 import { registerDebug } from './routes/debug.ts'
 import { registerEvents } from './routes/events.ts'
 import { registerGithub } from './routes/github.ts'
@@ -56,6 +57,7 @@ export async function buildServer(config: Config, services: Services): Promise<F
   registerEvents(app, log, config)
   registerProjects(app, projects)
   registerBuild(app, builds, projects, config)
+  registerChanges(app, projects)
   registerThreads(app, log, projects, sessions)
   registerGithub(app, projects, github)
   registerPrompt(app, sessions)
