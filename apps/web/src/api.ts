@@ -28,6 +28,10 @@ const BASE: string = import.meta.env.VITE_API_BASE ?? ''
 
 export const eventStreamUrl = (): string => `${BASE}/api/events`
 
+/** SSE of a project's live setup output (clone + install). */
+export const buildStreamUrl = (projectId: string): string =>
+  `${BASE}/api/projects/${encodeURIComponent(projectId)}/build`
+
 export class ApiError extends Error {
   constructor(
     readonly status: number,
@@ -93,6 +97,11 @@ export async function renameThread(projectId: string, threadId: string, title: s
 /** Hide a thread from the list (the log keeps its events). 204 on success. */
 export async function deleteThread(projectId: string, threadId: string): Promise<void> {
   await expectOk(await fetch(threadUrl(projectId, threadId), { method: 'DELETE' }))
+}
+
+/** Abort an in-progress build; the server SIGTERMs the child and cleans up. 202/409. */
+export async function cancelBuild(projectId: string): Promise<void> {
+  await expectOk(await fetch(`${BASE}/api/projects/${encodeURIComponent(projectId)}/build/cancel`, { method: 'POST' }))
 }
 
 /** The projects the picker shows. Authoritative — the server reads disk. */

@@ -14,7 +14,7 @@ const ACTIVE_KEY = 'mce.activeProject'
 export function useProjects(): {
   projects: Project[]
   activeId: string | null
-  setActiveId: (id: string) => void
+  setActiveId: (id: string | null) => void
   refresh: () => Promise<void>
 } {
   const [projects, setProjects] = useState<Project[]>([])
@@ -34,8 +34,9 @@ export function useProjects(): {
     void refresh()
   }, [refresh])
 
-  const setActiveId = useCallback((id: string) => {
-    localStorage.setItem(ACTIVE_KEY, id)
+  const setActiveId = useCallback((id: string | null) => {
+    if (id === null) localStorage.removeItem(ACTIVE_KEY)
+    else localStorage.setItem(ACTIVE_KEY, id)
     setActive(id)
   }, [])
 

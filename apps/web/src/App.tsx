@@ -2,12 +2,14 @@ import { LEGACY_THREAD_ID } from '@mce/protocol'
 import { ChevronDown, History, MessageCirclePlus } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import { deleteThread, fetchHealth, type Health, renameThread } from './api.ts'
+import { BuildModal } from './components/BuildModal.tsx'
 import { MessageList } from './components/MessageList.tsx'
 import { NotificationsButton } from './components/NotificationsButton.tsx'
 import { ProjectPicker } from './components/ProjectPicker.tsx'
 import { PromptBox } from './components/PromptBox.tsx'
 import { ThreadList } from './components/ThreadList.tsx'
 import { type AgentState, viewOf } from './events.ts'
+import { useBuilds } from './useBuilds.ts'
 import { useEventStream, useKeyboardInset } from './useEventStream.ts'
 import { useProjects } from './useProjects.ts'
 import { useThreads } from './useThreads.ts'
@@ -37,6 +39,7 @@ export function App(): React.JSX.Element {
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null)
   const [health, setHealth] = useState<Health | undefined>()
   const [overlay, setOverlay] = useState<Overlay>(null)
+  const builds = useBuilds(state)
   useKeyboardInset()
 
   const startNewThread = useCallback(() => setActiveThreadId(crypto.randomUUID()), [])
@@ -81,6 +84,9 @@ export function App(): React.JSX.Element {
   const view = viewOf(state, activeThreadId)
   const agent = AGENT[view.agent]
   const projectName = projects.find((p) => p.id === activeProjectId)?.name
+  // While a project sets up, the build modal replaces the thread — leaving the
+  // header usable so you can switch away and come back to it, still building.
+  const showBuild = activeProjectId !== null && builds.shouldShow(activeProjectId)
 
   return (
     // `app` owns 100dvh and the keyboard inset. See styles.css.
@@ -134,19 +140,34 @@ export function App(): React.JSX.Element {
         <Banner tone="quiet">Reconnecting… nothing is lost; the stream resumes where it stopped.</Banner>
       )}
 
-      <MessageList items={view.items} projectId={activeProjectId ?? undefined} />
+      {showBuild && activeProjectId ? (
+        <BuildModal
+          projectId={activeProjectId}
+          projectName={projectName ?? activeProjectId}
+          onOpen={() => builds.dismiss(activeProjectId)}
+          onBack={() => {
+            builds.dismiss(activeProjectId)
+            projectsState.setActiveId(null)
+            setOverlay('projects')
+          }}
+        />
+      ) : (
+        <>
+          <MessageList items={view.items} projectId={activeProjectId ?? undefined} />
 
-      <PromptBox
-        projectId={activeProjectId}
-        threadId={isLegacy ? null : activeThreadId}
-        disabledReason={
-          !activeProjectId
-            ? 'Pick a project'
-            : isLegacy
-              ? 'This is a previous conversation — start a new thread to continue'
-              : undefined
-        }
-      />
+          <PromptBox
+            projectId={activeProjectId}
+            threadId={isLegacy ? null : activeThreadId}
+            disabledReason={
+              !activeProjectId
+                ? 'Pick a project'
+                : isLegacy
+                  ? 'This is a previous conversation — start a new thread to continue'
+                  : undefined
+            }
+          />
+        </>
+      )}
 
       {overlay === 'projects' && (
         <ProjectPicker
@@ -155,6 +176,11 @@ export function App(): React.JSX.Element {
           failed={state.failed}
           onSelect={(id) => {
             projectsState.setActiveId(id) // the effect above starts a fresh thread
+            setOverlay(null)
+          }}
+          onStarted={(projectId) => {
+            builds.start(projectId)
+            projectsState.setActiveId(projectId)
             setOverlay(null)
           }}
           onClose={() => setOverlay(null)}

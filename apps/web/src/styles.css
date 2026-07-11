@@ -105,3 +105,16 @@ body {
 .animate-pulse-dot {
   animation: pulse 1s infinite;
 }
+
+/* An honest "it's working" bar for the build modal — no percentage to fake. */
+@keyframes indeterminate {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(400%);
+  }
+}
+.animate-indeterminate {
+  animation: indeterminate 1.1s ease-in-out infinite;
+}

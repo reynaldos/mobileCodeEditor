@@ -5,6 +5,15 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { ApiError, checkProjectName, createProject, fetchGithubRepos } from '../api.ts'
 import { useDebounced } from '../useDebounced.ts'
 import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from './ui/dialog.tsx'
+import {
   Drawer,
   DrawerContent,
   DrawerDescription,
@@ -19,6 +28,8 @@ interface Props {
   /** Names that failed to clone/init, keyed by name → error. From the event stream. */
   failed: Record<string, string>
   onSelect: (id: string) => void
+  /** A clone/create was confirmed and kicked off — the caller shows the build modal. */
+  onStarted: (projectId: string) => void
   onClose: () => void
 }
 
@@ -27,7 +38,7 @@ interface Props {
  * picker". Tap a project to switch; the two actions dock to the bottom and each
  * opens its own drawer (Clone / Create).
  */
-export function ProjectPicker({ projects, activeId, failed, onSelect, onClose }: Props): React.JSX.Element {
+export function ProjectPicker({ projects, activeId, failed, onSelect, onStarted, onClose }: Props): React.JSX.Element {
   return (
     <div className="fixed inset-0 z-20 flex flex-col bg-bg/95 backdrop-blur-sm">
       <header className="flex items-center justify-between border-b border-line px-4 pb-3 pt-[calc(12px+env(safe-area-inset-top,0px))]">
@@ -75,7 +86,7 @@ export function ProjectPicker({ projects, activeId, failed, onSelect, onClose }:
               <DrawerDescription>Search your GitHub repos, or paste a git URL.</DrawerDescription>
             </DrawerHeader>
             <div className="flex min-h-0 flex-1 flex-col px-4 pb-[calc(16px+env(safe-area-inset-bottom,0px))]">
-              <CloneForm projects={projects} failed={failed} />
+              <CloneForm projects={projects} onStarted={onStarted} />
             </div>
           </DrawerContent>
         </Drawer>
@@ -92,7 +103,7 @@ export function ProjectPicker({ projects, activeId, failed, onSelect, onClose }:
               <DrawerDescription>Make a new GitHub repo and clone it.</DrawerDescription>
             </DrawerHeader>
             <div className="min-h-0 overflow-y-auto px-4 pb-[calc(16px+env(safe-area-inset-bottom,0px))]">
-              <CreateForm failed={failed} />
+              <CreateForm onStarted={onStarted} />
             </div>
           </DrawerContent>
         </Drawer>
@@ -126,13 +137,12 @@ const PAGE = 12
  * matched set is fetched once (debounced), so scrolling never flickers. A clone
  * returns 202; the project appears in the list above when `project_created` lands.
  */
-function CloneForm({ projects, failed }: { projects: Project[]; failed: Record<string, string> }): React.JSX.Element {
+function CloneForm({ projects, onStarted }: { projects: Project[]; onStarted: (id: string) => void }): React.JSX.Element {
   const [query, setQuery] = useState('')
   const [repos, setRepos] = useState<GithubRepo[]>([])
   const [loading, setLoading] = useState(false)
   const [visible, setVisible] = useState(PAGE)
-  const [pending, setPending] = useState<string | undefined>()
-  const [error, setError] = useState<string | undefined>()
+  const [confirm, setConfirm] = useState<{ repoUrl: string; label: string } | undefined>()
   const debounced = useDebounced(query, 300)
   const scroller = useRef<HTMLDivElement>(null)
 
@@ -175,7 +185,6 @@ function CloneForm({ projects, failed }: { projects: Project[]; failed: Record<s
     }
   }, [debounced])
 
-  const pendingError = pending ? failed[pending] : undefined
   const suggestions = repos.filter((r) => !isAdded(r))
   const shown = suggestions.slice(0, visible)
 
@@ -183,18 +192,6 @@ function CloneForm({ projects, failed }: { projects: Project[]; failed: Record<s
     const el = e.currentTarget
     if (el.scrollHeight - el.scrollTop - el.clientHeight < 120 && visible < suggestions.length) {
       setVisible((v) => v + PAGE)
-    }
-  }
-
-  async function clone(repoUrl: string): Promise<void> {
-    setError(undefined)
-    try {
-      const { projectId } = await createProject({ repoUrl })
-      setPending(projectId)
-      setQuery('')
-      setRepos([])
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : String(err))
     }
   }
 
@@ -207,7 +204,9 @@ function CloneForm({ projects, failed }: { projects: Project[]; failed: Record<s
           value={query}
           placeholder="Search your repos, or paste a git URL"
           onChange={(e) => setQuery(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && isUrl && void clone(query.trim())}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && isUrl) setConfirm({ repoUrl: query.trim(), label: query.trim() })
+          }}
         />
         {loading ? (
           <Loader className="absolute right-3 top-1/2 size-4 -translate-y-1/2 animate-spin text-muted" />
@@ -226,7 +225,7 @@ function CloneForm({ projects, failed }: { projects: Project[]; failed: Record<s
       {isUrl && (
         <button
           className="mt-3 min-h-11 shrink-0 rounded-xl border border-accent bg-accent px-4 font-semibold text-[#06101f]"
-          onClick={() => void clone(query.trim())}
+          onClick={() => setConfirm({ repoUrl: query.trim(), label: query.trim() })}
         >
           Clone this URL
         </button>
@@ -239,7 +238,7 @@ function CloneForm({ projects, failed }: { projects: Project[]; failed: Record<s
               <li key={r.nameWithOwner}>
                 <button
                   className="flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left hover:bg-panel-2"
-                  onClick={() => void clone(r.cloneUrl)}
+                  onClick={() => setConfirm({ repoUrl: r.cloneUrl, label: r.nameWithOwner })}
                 >
                   <span className="flex size-9 shrink-0 items-center justify-center rounded-lg border border-line bg-panel-2 text-muted">
                     {r.private ? <Lock className="size-4" /> : <Globe className="size-4" />}
@@ -267,9 +266,16 @@ function CloneForm({ projects, failed }: { projects: Project[]; failed: Record<s
         )}
       </div>
 
-      {pending && !pendingError && <p className="mt-2 shrink-0 text-[13px] text-accent">Cloning {pending}…</p>}
-      {pendingError && <p className="mt-2 shrink-0 text-[13px] text-del">{pending}: {pendingError}</p>}
-      {error && <p className="mt-2 shrink-0 text-[13px] text-del">{error}</p>}
+      <ConfirmDialog
+        open={confirm !== undefined}
+        onOpenChange={(o) => !o && setConfirm(undefined)}
+        title="Clone this repository?"
+        target={confirm?.label ?? ''}
+        description="It'll be downloaded and set up (clone, then install dependencies)."
+        confirmLabel="Clone"
+        request={() => createProject({ repoUrl: confirm!.repoUrl })}
+        onStarted={onStarted}
+      />
     </div>
   )
 }
@@ -295,13 +301,12 @@ function SkeletonRows(): React.JSX.Element {
  * Name a new repo; we check availability (locally + on GitHub) as you type and
  * let you pick visibility. Create makes the GitHub repo and clones it.
  */
-function CreateForm({ failed }: { failed: Record<string, string> }): React.JSX.Element {
+function CreateForm({ onStarted }: { onStarted: (id: string) => void }): React.JSX.Element {
   const [name, setName] = useState('')
   const [visibility, setVisibility] = useState<Visibility>('private')
   const [check, setCheck] = useState<NameCheckResponse | null>(null)
   const [checking, setChecking] = useState(false)
-  const [pending, setPending] = useState<string | undefined>()
-  const [error, setError] = useState<string | undefined>()
+  const [confirm, setConfirm] = useState(false)
   const debounced = useDebounced(name, 400)
 
   useEffect(() => {
@@ -319,21 +324,10 @@ function CreateForm({ failed }: { failed: Record<string, string> }): React.JSX.E
     }
   }, [debounced])
 
-  const pendingError = pending ? failed[pending] : undefined
   const taken = !checking && check !== null && !check.available
   // With GitHub off, check is null — allow create (it becomes a local init server-side).
-  const canCreate = Boolean(name.trim()) && (check === null || check.available) && !pending
-
-  async function create(): Promise<void> {
-    setError(undefined)
-    try {
-      const { projectId } = await createProject({ name: name.trim(), visibility })
-      setPending(projectId)
-      setName('')
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : String(err))
-    }
-  }
+  const canCreate = Boolean(name.trim()) && (check === null || check.available)
+  const target = `${check?.owner ? `${check.owner}/` : ''}${name.trim()}`
 
   return (
     <div className="flex flex-col gap-4">
@@ -399,13 +393,102 @@ function CreateForm({ failed }: { failed: Record<string, string> }): React.JSX.E
       <button
         className="min-h-12 shrink-0 rounded-xl border border-accent bg-accent text-[15px] font-semibold text-[#06101f] disabled:opacity-50"
         disabled={!canCreate}
-        onClick={() => void create()}
+        onClick={() => setConfirm(true)}
       >
-        {pending ? 'Creating…' : 'Create repository'}
+        Create repository
       </button>
 
-      {pendingError && <p className="text-[13px] text-del">{pending}: {pendingError}</p>}
-      {error && <p className="text-[13px] text-del">{error}</p>}
+      <ConfirmDialog
+        open={confirm}
+        onOpenChange={setConfirm}
+        title="Create this repository?"
+        target={target}
+        description={`A new ${visibility} repo will be created and set up (clone, then install dependencies).`}
+        confirmLabel="Create"
+        request={() => createProject({ name: name.trim(), visibility })}
+        onStarted={onStarted}
+      />
     </div>
+  )
+}
+
+/**
+ * A blocking confirm step before a clone/create: names the target, fires the
+ * request on confirm, and hands the new projectId up so the caller can switch to
+ * it and show the build modal. Pre-flight failures (e.g. a 409) stay in the dialog.
+ */
+function ConfirmDialog({
+  open,
+  onOpenChange,
+  title,
+  target,
+  description,
+  confirmLabel,
+  request,
+  onStarted,
+}: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  title: string
+  target: string
+  description: string
+  confirmLabel: string
+  request: () => Promise<{ projectId: string }>
+  onStarted: (projectId: string) => void
+}): React.JSX.Element {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | undefined>()
+
+  async function go(): Promise<void> {
+    setBusy(true)
+    setError(undefined)
+    try {
+      const { projectId } = await request()
+      onStarted(projectId) // parent closes the picker and shows the build modal
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : String(err))
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(o) => {
+        if (busy) return
+        setError(undefined)
+        onOpenChange(o)
+      }}
+    >
+      <DialogContent showClose={!busy}>
+        <DialogHeader>
+          <DialogTitle>{title}</DialogTitle>
+          <DialogDescription>{description}</DialogDescription>
+        </DialogHeader>
+
+        {target && (
+          <p className="truncate rounded-lg border border-line bg-panel-2 px-3 py-2 font-mono text-[13px] text-fg">{target}</p>
+        )}
+        {error && <p className="mt-2 text-[13px] text-del">{error}</p>}
+
+        <DialogFooter>
+          <DialogClose asChild>
+            <button
+              className="min-h-11 flex-1 rounded-xl border border-line bg-panel-2 text-[14px] font-medium text-fg disabled:opacity-50"
+              disabled={busy}
+            >
+              Cancel
+            </button>
+          </DialogClose>
+          <button
+            className="min-h-11 flex-1 rounded-xl border border-accent bg-accent text-[14px] font-semibold text-[#06101f] disabled:opacity-50"
+            disabled={busy}
+            onClick={() => void go()}
+          >
+            {busy ? 'Starting…' : confirmLabel}
+          </button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }
