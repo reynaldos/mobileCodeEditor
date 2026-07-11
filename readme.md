@@ -14,13 +14,14 @@ your thumb, get pushed when it needs you, and it commits and pushes to GitHub **
 against a container on Fly.io that never sleeps.
 
 Shipped: Phase 0 (the one-screen MVP, on-device acceptance passed), a New conversation button,
-Phase 1 (web push, on-device), the Tailwind 4 migration, containerization, and the Fly deploy
-— Tailscale runs inside the container, so nothing is public and there's no server auth to
-build. 85 tests pass.
+Phase 1 (web push, on-device), the Tailwind 4 migration, containerization, the Fly deploy
+(Tailscale in-container, nothing public, no server auth), CI/CD (push to main → test →
+deploy), and **Phase 2 — projects** (multi-repo clone/create/switch, built and verified
+locally; on-device test pending). 90 tests pass.
 
-**Next:** wire up CI/CD (the workflow's written — needs the repo on GitHub + a `FLY_API_TOKEN`
-secret), then **Phase 2 — projects** so you can work on more than one repo. The full picture,
-milestones, and reasoning are in **[docs/ROADMAP.md](docs/ROADMAP.md)**.
+**Next:** the on-device test of Phase 2 (clone a second repo from the phone), then Phase 3
+(files + editor) or Phase 5 (preview). The full picture, milestones, and reasoning are in
+**[docs/ROADMAP.md](docs/ROADMAP.md)**.
 
 Deploy runbooks: **[docs/DEPLOY-FLY.md](docs/DEPLOY-FLY.md)** (what's running) and
 [docs/DEPLOY-ORACLE.md](docs/DEPLOY-ORACLE.md) (the free-tier alternative we tried first).

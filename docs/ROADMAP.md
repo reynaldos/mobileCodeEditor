@@ -22,22 +22,17 @@ against a container running on Fly.io that never sleeps, with your laptop closed
 | Tailwind 4 migration | ✅ done |
 | Containerize the workspace | ✅ done |
 | Deploy to Fly (always-on, Tailscale in-container) | ✅ done, phone-verified |
-| CI/CD — auto-deploy on push to main | ⏳ workflow written; needs GitHub repo + `FLY_API_TOKEN` |
-| Phase 2 — projects (multi-repo, clone, picker) | ▫️ next |
+| CI/CD — auto-deploy on push to main | ✅ done (push to main → test → deploy) |
+| Phase 2 — projects (multi-repo, clone, picker) | ✅ built + verified locally; on-device test pending |
 | Phase 3 — files + editor · 4 — terminal · 5 — preview · 6 — convenience | ▫️ not started |
 
 **Recommended next steps**, in order:
 
-1. **Finish the CI/CD wiring** (~15 min). The workflow at `.github/workflows/deploy.yml` is
-   done and runs the full test suite before deploying. It just needs the repo on GitHub, a
-   `fly tokens create deploy` token, and that token saved as the `FLY_API_TOKEN` repo secret.
-   High leverage: every future change becomes "push to main," and a red build can't reach the
-   live app.
-2. **Phase 2 — projects.** You have exactly one repo wired in. The moment you want a second,
-   this is the feature. It's the lowest-risk next capability (`project_id` has been on the log
-   since day one) and the highest daily value. See below.
-3. Then let real use pick between **preview** (Phase 5 — seeing the running app is a big deal
-   on a phone) and **files + editor** (Phase 3). Both are additive.
+1. **On-device test of Phase 2.** It's built and verified locally (90 tests, live routing);
+   the last step is the real thing — from your phone, clone a second repo, switch, prompt
+   each, confirm isolated conversations. Then `git push` and it auto-deploys.
+2. Then let real use pick between **preview** (Phase 5 — seeing the running app is a big deal
+   on a phone; note the Fly wrinkle below) and **files + editor** (Phase 3). Both are additive.
 
 Deferred deliberately, still correct: multi-tenant (a different product — [DECISIONS #13](DECISIONS.md)),
 and many-containers (only when two projects want conflicting toolchains).

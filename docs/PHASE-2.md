@@ -40,26 +40,29 @@ a button.
   (clone/init in the background, emitting the outcome to the log).
 - `log.projectCreations()` — reads existing events, no schema change.
 
-### Block 2 — Create + clone routes (server)
+### Block 2 — Create + clone routes (server)  ✅
 - `GET /api/projects`, `POST /api/projects` (`{repoUrl}` → clone, `{name}` → init), 202 +
   event-driven completion.
 
-### Block 3 — Per-project sessions (server)
+### Block 3 — Per-project sessions (server)  ✅
 - `AgentSession` takes an explicit project (id + path), not the single global config.
 - `SessionManager` keyed by `projectId`; `prompt(projectId, …)`, `newConversation(projectId)`.
-- `log` resume/reset queries gain a `projectId` filter — WHERE clauses, no schema change.
+- `log` resume/reset queries gained a `projectId` filter — WHERE clauses, no schema change.
 
-### Block 4 — Client core
-- `api.ts` project methods; `sendPrompt`/`startNewConversation` gain `projectId`.
-- Reducer becomes `byProject`; active project is React state persisted in `localStorage`.
+### Blocks 4 + 5 — Client + picker  ✅ (inseparable on the client, one commit)
+- `api.ts` project methods; `sendPrompt`/`startNewConversation` take `projectId`.
+- Reducer is `byProject`; active project is React state persisted in `localStorage`.
+- Overlay picker (not a router), a "+ New" form (clone URL or fresh name) with a spinner
+  driven by the event, and a header that shows/switches the active project.
 
-### Block 5 — Picker + UI
-- A lightweight overlay picker (not a router), a "+ New" form (clone URL or fresh name) with
-  a cloning spinner driven by the event, and a header that shows/switches the active project.
-
-### Block 6 — Verify
-- `curl` the routes against a scratch DB; per-project session isolation with the fake `query`;
-  reducer project-filtering tests; typecheck + build. Then the on-device test.
+### Block 6 — Verify  ✅
+- 90 tests (67 server, 23 web): projects registry (sanitize, traversal guard, failed-clone
+  cleanup), two-project session isolation with the fake `query`, reducer project-filtering,
+  routes. Typecheck + build clean.
+- Live end-to-end against a scratch DB: `projectCount` 2, prompt routing (404 unknown / 400
+  no id / 503 real-no-token), the global SSE carrying per-project events, a route-created
+  project appearing in the list.
+- **Remaining: the on-device acceptance test** (below) — needs a phone and a token.
 
 ---
 
