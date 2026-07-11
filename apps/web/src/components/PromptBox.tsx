@@ -1,4 +1,4 @@
-import { ArrowUp, Plus, X } from 'lucide-react'
+import { ArrowUp, Maximize2, Minimize2, Plus, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { sendPrompt, uploadImages } from '../api.ts'
 
@@ -31,6 +31,8 @@ export function PromptBox({
   const [images, setImages] = useState<PendingImage[]>([])
   const [sending, setSending] = useState(false)
   const [error, setError] = useState<string | undefined>()
+  const [isMultiline, setIsMultiline] = useState(false)
+  const [expanded, setExpanded] = useState(false)
   const ready = Boolean(projectId && threadId && !disabledReason)
 
   const libraryRef = useRef<HTMLInputElement>(null)
@@ -52,12 +54,28 @@ export function PromptBox({
   // `text` is cleared programmatically (e.g. after send) — an `onInput`
   // handler only sees real user keystrokes and would leave the box stuck at
   // its last-grown height after a submit.
+  //
+  // Skipped while expanded: the drawer's textarea fills its container via
+  // flex-1 (CSS), and setting an inline px height here would fight that.
   useEffect(() => {
     const el = textareaRef.current
-    if (!el) return
+    if (!el || expanded) return
     el.style.height = 'auto'
-    el.style.height = `${Math.min(el.scrollHeight, 160)}px`
-  }, [text])
+    const scrollHeight = el.scrollHeight
+    el.style.height = `${Math.min(scrollHeight, 160)}px`
+    // A single resting line lands right at the min-height (~36px); anything
+    // past that means the box has actually grown, whether from an explicit
+    // newline or the line simply wrapping.
+    setIsMultiline(scrollHeight > 44)
+  }, [text, expanded])
+
+  // Re-focus after switching modes — the compact and expanded views render
+  // distinct <textarea> elements (mounted one at a time), so toggling
+  // `expanded` unmounts one and mounts the other, which would otherwise drop
+  // focus and dismiss the on-screen keyboard.
+  useEffect(() => {
+    textareaRef.current?.focus()
+  }, [expanded])
 
   const uploading = images.some((i) => i.status === 'uploading')
 
@@ -126,6 +144,7 @@ export function PromptBox({
       setText('')
       for (const img of images) URL.revokeObjectURL(img.previewUrl)
       setImages([])
+      setExpanded(false)
       // The `user_prompt` event comes back over SSE and renders itself.
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
@@ -134,89 +153,151 @@ export function PromptBox({
     }
   }
 
-  return (
-    // `prompt-bar` is targeted by a :has() rule that drops the safe-area padding
-    // once the keyboard has lifted the app. See styles.css.
-    <div className="prompt-bar shrink-0 border-t border-line bg-panel px-3 pt-2.5 pb-[calc(10px+env(safe-area-inset-bottom,0px))]">
-      {error && <p className="mb-2 text-[13px] text-del">{error}</p>}
+  // Shared across the compact bar and the expanded drawer below — kept as
+  // plain values (not components) since only one of the two branches ever
+  // mounts at a time, so reusing the same element/props twice is safe.
+  const imagesStrip = images.length > 0 && (
+    <div className="mb-2 flex shrink-0 gap-2 overflow-x-auto">
+      {images.map((img) => (
+        <div key={img.key} className="relative size-16 shrink-0 overflow-hidden rounded-lg border border-line">
+          <img src={img.previewUrl} alt="" className="size-full object-cover" />
+          {img.status === 'uploading' && (
+            <div className="absolute inset-0 grid place-items-center bg-black/40 text-[11px] text-white">…</div>
+          )}
+          {img.status === 'error' && (
+            <div
+              className="absolute inset-0 grid place-items-center bg-del/70 text-[11px] text-white"
+              title={img.error}
+            >
+              !
+            </div>
+          )}
+          <button
+            type="button"
+            onClick={() => removeImage(img.key)}
+            aria-label="Remove image"
+            className="absolute top-0.5 right-0.5 grid size-4 place-items-center rounded-full bg-black/60 text-white"
+          >
+            <X size={10} />
+          </button>
+        </div>
+      ))}
+    </div>
+  )
 
-      {images.length > 0 && (
-        <div className="mb-2 flex gap-2 overflow-x-auto">
-          {images.map((img) => (
-            <div key={img.key} className="relative size-16 shrink-0 overflow-hidden rounded-lg border border-line">
-              <img src={img.previewUrl} alt="" className="size-full object-cover" />
-              {img.status === 'uploading' && (
-                <div className="absolute inset-0 grid place-items-center bg-black/40 text-[11px] text-white">…</div>
-              )}
-              {img.status === 'error' && (
-                <div
-                  className="absolute inset-0 grid place-items-center bg-del/70 text-[11px] text-white"
-                  title={img.error}
-                >
-                  !
-                </div>
-              )}
+  const addPhotoButton = (
+    <button
+      type="button"
+      aria-label="Add a photo"
+      disabled={!ready}
+      onClick={() => libraryRef.current?.click()}
+      className="grid size-9 shrink-0 place-items-center rounded-full text-muted disabled:opacity-50"
+    >
+      <Plus size={18} />
+    </button>
+  )
+
+  const sendButton = (
+    <button
+      aria-label="Send"
+      className="grid size-9 shrink-0 place-items-center rounded-full bg-accent text-[#06101f] disabled:opacity-50"
+      disabled={sending || (!text.trim() && images.length === 0) || !ready || uploading}
+      onClick={() => void submit()}
+    >
+      {sending ? '…' : <ArrowUp size={18} />}
+    </button>
+  )
+
+  const textareaCommonProps = {
+    ref: textareaRef,
+    value: text,
+    disabled: !ready,
+    placeholder: ready ? 'What should Claude do?' : (disabledReason ?? 'Pick a project and thread'),
+    // Enter inserts a newline on a phone keyboard. Sending is a button.
+    onChange: (e: React.ChangeEvent<HTMLTextAreaElement>) => setText(e.target.value),
+    onPaste: (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+      // Does NOT preventDefault — a plain text paste must still work.
+      const files = [...e.clipboardData.items]
+        .filter((it) => it.kind === 'file' && it.type.startsWith('image/'))
+        .map((it) => it.getAsFile())
+        .filter((f): f is File => f !== null)
+      if (files.length > 0) handleFiles(files)
+    },
+  }
+
+  return (
+    <>
+      {/* Shared by both branches below, so it has to live outside either one
+       *  — otherwise the ref goes stale for whichever branch isn't mounted. */}
+      <input
+        ref={libraryRef}
+        type="file"
+        accept="image/*"
+        multiple
+        className="hidden"
+        onChange={(e) => {
+          handleFiles([...(e.target.files ?? [])])
+          e.target.value = ''
+        }}
+      />
+
+      {expanded ? (
+        <div className="fixed inset-0 z-50 flex flex-col bg-panel">
+          <div className="relative flex min-h-0 flex-1 flex-col px-3 pt-[calc(12px+env(safe-area-inset-top,0px))]">
+            <button
+              type="button"
+              aria-label="Collapse"
+              onClick={() => setExpanded(false)}
+              className="absolute top-[calc(12px+env(safe-area-inset-top,0px))] right-3 z-10 grid size-8 place-items-center rounded-full bg-panel-2 text-muted"
+            >
+              <Minimize2 size={16} />
+            </button>
+            {error && <p className="mb-2 shrink-0 text-[13px] text-del">{error}</p>}
+            {imagesStrip}
+            <textarea
+              {...textareaCommonProps}
+              className="prompt-input min-h-0 flex-1 resize-none bg-transparent pt-1 pr-10 pb-2 text-fg outline-none"
+            />
+          </div>
+          {/* `prompt-bar` here (not just in the compact view below) is what the
+           *  `.app:has(.prompt-input:focus) .prompt-bar` rule in styles.css
+           *  keys off to drop the redundant safe-area padding once the
+           *  keyboard is up. */}
+          <div className="prompt-bar flex shrink-0 items-center justify-between gap-1 border-t border-line px-3 py-2 pb-[calc(10px+env(safe-area-inset-bottom,0px))]">
+            {addPhotoButton}
+            {sendButton}
+          </div>
+        </div>
+      ) : (
+        // `prompt-bar` is targeted by a :has() rule that drops the safe-area padding
+        // once the keyboard has lifted the app. See styles.css.
+        <div className="prompt-bar shrink-0 border-t border-line bg-panel px-3 pt-2.5 pb-[calc(10px+env(safe-area-inset-bottom,0px))]">
+          {error && <p className="mb-2 text-[13px] text-del">{error}</p>}
+          {imagesStrip}
+
+          <div className="relative">
+            {isMultiline && (
               <button
                 type="button"
-                onClick={() => removeImage(img.key)}
-                aria-label="Remove image"
-                className="absolute top-0.5 right-0.5 grid size-4 place-items-center rounded-full bg-black/60 text-white"
+                aria-label="Expand"
+                onClick={() => setExpanded(true)}
+                className="absolute top-2 right-2 z-10 grid size-7 place-items-center rounded-full bg-panel-2 text-muted shadow-sm"
               >
-                <X size={10} />
+                <Maximize2 size={14} />
               </button>
+            )}
+            <div className="flex items-end gap-1 rounded-3xl border border-line bg-panel-2 py-1.5 pr-1.5 pl-1 focus-within:border-accent">
+              {addPhotoButton}
+              <textarea
+                {...textareaCommonProps}
+                rows={1}
+                className="prompt-input max-h-40 min-h-9 flex-1 resize-none bg-transparent px-1 py-1.5 text-fg outline-none"
+              />
+              {sendButton}
             </div>
-          ))}
+          </div>
         </div>
       )}
-
-      <div className="flex items-end gap-1 rounded-3xl border border-line bg-panel-2 py-1.5 pr-1.5 pl-1 focus-within:border-accent">
-        <input
-          ref={libraryRef}
-          type="file"
-          accept="image/*"
-          multiple
-          className="hidden"
-          onChange={(e) => {
-            handleFiles([...(e.target.files ?? [])])
-            e.target.value = ''
-          }}
-        />
-        <button
-          type="button"
-          aria-label="Add a photo"
-          disabled={!ready}
-          onClick={() => libraryRef.current?.click()}
-          className="grid size-9 shrink-0 place-items-center rounded-full text-muted disabled:opacity-50"
-        >
-          <Plus size={18} />
-        </button>
-        <textarea
-          ref={textareaRef}
-          className="prompt-input max-h-40 min-h-9 flex-1 resize-none bg-transparent px-1 py-1.5 text-fg outline-none"
-          value={text}
-          rows={1}
-          disabled={!ready}
-          placeholder={ready ? 'What should Claude do?' : (disabledReason ?? 'Pick a project and thread')}
-          // Enter inserts a newline on a phone keyboard. Sending is a button.
-          onChange={(e) => setText(e.target.value)}
-          onPaste={(e) => {
-            // Does NOT preventDefault — a plain text paste must still work.
-            const files = [...e.clipboardData.items]
-              .filter((it) => it.kind === 'file' && it.type.startsWith('image/'))
-              .map((it) => it.getAsFile())
-              .filter((f): f is File => f !== null)
-            if (files.length > 0) handleFiles(files)
-          }}
-        />
-        <button
-          aria-label="Send"
-          className="grid size-9 shrink-0 place-items-center rounded-full bg-accent text-[#06101f] disabled:opacity-50"
-          disabled={sending || (!text.trim() && images.length === 0) || !ready || uploading}
-          onClick={() => void submit()}
-        >
-          {sending ? '…' : <ArrowUp size={18} />}
-        </button>
-      </div>
-    </div>
+    </>
   )
 }
