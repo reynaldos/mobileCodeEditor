@@ -61,10 +61,11 @@ export class Github {
         )
       : repos
 
+    // Return the whole matched set (the fetch already caps at 100) — the client
+    // scrolls and reveals it incrementally, so it needs more than a handful.
     return matched
       .map((r) => ({ ...r, isOwn: r.owner === login }))
       .sort((a, b) => Number(b.isOwn) - Number(a.isOwn))
-      .slice(0, 8)
   }
 
   /** Does `owner/name` already exist on GitHub? */

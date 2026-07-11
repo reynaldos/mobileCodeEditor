@@ -1,9 +1,17 @@
 import type { GithubRepo, NameCheckResponse, Visibility } from '@mce/protocol'
 import type { Project } from '@mce/protocol'
-import { ChevronDown, ChevronRight } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { Check, Globe, Loader, Lock, Search, X } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { ApiError, checkProjectName, createProject, fetchGithubRepos } from '../api.ts'
 import { useDebounced } from '../useDebounced.ts'
+import {
+  Drawer,
+  DrawerContent,
+  DrawerDescription,
+  DrawerHeader,
+  DrawerTitle,
+  DrawerTrigger,
+} from './ui/drawer.tsx'
 
 interface Props {
   projects: Project[]
@@ -16,7 +24,8 @@ interface Props {
 
 /**
  * A full-screen overlay, not a router — Phase 2's IA is still "one screen plus a
- * picker". Tap a project to switch; add one via the Clone or Create tab below.
+ * picker". Tap a project to switch; the two actions dock to the bottom and each
+ * opens its own drawer (Clone / Create).
  */
 export function ProjectPicker({ projects, activeId, failed, onSelect, onClose }: Props): React.JSX.Element {
   return (
@@ -38,16 +47,10 @@ export function ProjectPicker({ projects, activeId, failed, onSelect, onClose }:
                 }`}
                 onClick={() => onSelect(p.id)}
               >
-                <div className="flex items-center justify-between">
-                  <span className="truncate font-medium">{p.name}</span>
-                  <span className="flex shrink-0 items-center text-[11px] text-muted">
-                    threads
-                    <ChevronRight className="size-3.5" />
-                  </span>
-                </div>
-                <div className="mt-0.5 truncate text-[12px] text-muted">
+                <span className="block truncate font-medium">{p.name}</span>
+                <span className="mt-0.5 block truncate text-[12px] text-muted">
                   {p.repoUrl ?? 'local'} {p.branch ? `· ${p.branch}` : ''}
-                </div>
+                </span>
                 {failed[p.name] && <div className="mt-1 text-[12px] text-del">{failed[p.name]}</div>}
               </button>
             </li>
@@ -56,38 +59,44 @@ export function ProjectPicker({ projects, activeId, failed, onSelect, onClose }:
             <li className="py-6 text-center text-muted">No projects yet. Add one below.</li>
           )}
         </ul>
-
-        <AddProject projects={projects} failed={failed} />
-      </div>
-    </div>
-  )
-}
-
-type Mode = 'clone' | 'create'
-
-const TAB = 'flex-1 rounded-lg border py-2 text-[13px] font-medium'
-
-function AddProject({ projects, failed }: { projects: Project[]; failed: Record<string, string> }): React.JSX.Element {
-  const [mode, setMode] = useState<Mode>('clone')
-
-  return (
-    <div className="mt-6 border-t border-line pt-4">
-      <div className="mb-3 flex gap-2">
-        <button
-          className={`${TAB} ${mode === 'clone' ? 'border-accent bg-panel text-fg' : 'border-line bg-panel-2 text-muted'}`}
-          onClick={() => setMode('clone')}
-        >
-          Clone repo
-        </button>
-        <button
-          className={`${TAB} ${mode === 'create' ? 'border-accent bg-panel text-fg' : 'border-line bg-panel-2 text-muted'}`}
-          onClick={() => setMode('create')}
-        >
-          Create repo
-        </button>
       </div>
 
-      {mode === 'clone' ? <CloneForm projects={projects} failed={failed} /> : <CreateForm failed={failed} />}
+      {/* Docked actions: each opens a drawer for its flow. */}
+      <div className="flex shrink-0 gap-2 border-t border-line bg-panel/80 px-4 pt-3 pb-[calc(12px+env(safe-area-inset-bottom,0px))] backdrop-blur">
+        <Drawer>
+          <DrawerTrigger asChild>
+            <button className="min-h-11 flex-1 rounded-xl border border-line bg-panel-2 text-[14px] font-medium text-fg">
+              Clone repo
+            </button>
+          </DrawerTrigger>
+          <DrawerContent>
+            <DrawerHeader>
+              <DrawerTitle>Clone a repo</DrawerTitle>
+              <DrawerDescription>Search your GitHub repos, or paste a git URL.</DrawerDescription>
+            </DrawerHeader>
+            <div className="flex min-h-0 flex-1 flex-col px-4 pb-[calc(16px+env(safe-area-inset-bottom,0px))]">
+              <CloneForm projects={projects} failed={failed} />
+            </div>
+          </DrawerContent>
+        </Drawer>
+
+        <Drawer>
+          <DrawerTrigger asChild>
+            <button className="min-h-11 flex-1 rounded-xl border border-accent bg-accent text-[14px] font-semibold text-[#06101f]">
+              Create repo
+            </button>
+          </DrawerTrigger>
+          <DrawerContent>
+            <DrawerHeader>
+              <DrawerTitle>Create a repo</DrawerTitle>
+              <DrawerDescription>Make a new GitHub repo and clone it.</DrawerDescription>
+            </DrawerHeader>
+            <div className="min-h-0 overflow-y-auto px-4 pb-[calc(16px+env(safe-area-inset-bottom,0px))]">
+              <CreateForm failed={failed} />
+            </div>
+          </DrawerContent>
+        </Drawer>
+      </div>
     </div>
   )
 }
@@ -108,22 +117,27 @@ const INPUT =
 
 const isGitUrl = (s: string): boolean => /^(https?:\/\/|git@|ssh:\/\/)/.test(s)
 
+/** How many rows to reveal at a time as you scroll the results. */
+const PAGE = 12
+
 /**
- * Type to search your repos (owned first), tap the chevron to browse the ones you
- * haven't added yet, or paste any git URL. A clone returns 202; the project
- * appears in the list above when its `project_created` lands.
+ * Type to search your repos (owned first), or paste any git URL. Results stream
+ * into a scrollable list that reveals more as you reach the bottom — the whole
+ * matched set is fetched once (debounced), so scrolling never flickers. A clone
+ * returns 202; the project appears in the list above when `project_created` lands.
  */
 function CloneForm({ projects, failed }: { projects: Project[]; failed: Record<string, string> }): React.JSX.Element {
   const [query, setQuery] = useState('')
   const [repos, setRepos] = useState<GithubRepo[]>([])
-  const [browsing, setBrowsing] = useState(false)
   const [loading, setLoading] = useState(false)
+  const [visible, setVisible] = useState(PAGE)
   const [pending, setPending] = useState<string | undefined>()
   const [error, setError] = useState<string | undefined>()
   const debounced = useDebounced(query, 300)
+  const scroller = useRef<HTMLDivElement>(null)
 
-  // Repos already cloned as projects, by owner/repo and by id — so browse and
-  // search only ever offer things you don't have yet.
+  // Repos already cloned as projects, by owner/repo and by id — so search only
+  // ever offers things you don't have yet.
   const added = useMemo(() => {
     const s = new Set<string>()
     for (const p of projects) {
@@ -135,8 +149,10 @@ function CloneForm({ projects, failed }: { projects: Project[]; failed: Record<s
   const isAdded = (r: GithubRepo): boolean =>
     added.has(r.nameWithOwner.toLowerCase()) || added.has((r.nameWithOwner.split('/')[1] ?? '').toLowerCase())
 
-  // One effect drives suggestions: a typed query searches; an open chevron with
-  // no query browses everything; a pasted URL shows nothing.
+  const isUrl = isGitUrl(query.trim())
+
+  // One fetch per debounced query (empty query browses everything). A pasted URL
+  // shows no suggestions — you clone it directly.
   useEffect(() => {
     let cancelled = false
     const q = debounced.trim()
@@ -144,23 +160,31 @@ function CloneForm({ projects, failed }: { projects: Project[]; failed: Record<s
       setRepos([])
       return
     }
-    if (!q && !browsing) {
-      setRepos([])
-      return
-    }
     setLoading(true)
     void fetchGithubRepos(q)
-      .then((r) => !cancelled && setRepos(r))
+      .then((r) => {
+        if (cancelled) return
+        setRepos(r)
+        setVisible(PAGE)
+        scroller.current?.scrollTo({ top: 0 })
+      })
       .catch(() => !cancelled && setRepos([]))
       .finally(() => !cancelled && setLoading(false))
     return () => {
       cancelled = true
     }
-  }, [debounced, browsing])
+  }, [debounced])
 
   const pendingError = pending ? failed[pending] : undefined
   const suggestions = repos.filter((r) => !isAdded(r))
-  const isUrl = isGitUrl(query.trim())
+  const shown = suggestions.slice(0, visible)
+
+  function onScroll(e: React.UIEvent<HTMLDivElement>): void {
+    const el = e.currentTarget
+    if (el.scrollHeight - el.scrollTop - el.clientHeight < 120 && visible < suggestions.length) {
+      setVisible((v) => v + PAGE)
+    }
+  }
 
   async function clone(repoUrl: string): Promise<void> {
     setError(undefined)
@@ -169,74 +193,101 @@ function CloneForm({ projects, failed }: { projects: Project[]; failed: Record<s
       setPending(projectId)
       setQuery('')
       setRepos([])
-      setBrowsing(false)
     } catch (err) {
       setError(err instanceof ApiError ? err.message : String(err))
     }
   }
 
   return (
-    <div>
-      <div className="flex gap-2">
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="relative shrink-0">
+        <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted" />
         <input
-          className={INPUT}
+          className="min-h-11 w-full rounded-xl border border-line bg-panel-2 pl-9 pr-10 text-[16px] text-fg outline-none focus:border-accent"
           value={query}
-          placeholder="search your repos, or paste a git URL"
+          placeholder="Search your repos, or paste a git URL"
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && isUrl && void clone(query.trim())}
         />
-        {isUrl ? (
+        {loading ? (
+          <Loader className="absolute right-3 top-1/2 size-4 -translate-y-1/2 animate-spin text-muted" />
+        ) : query ? (
           <button
-            className="min-h-11 shrink-0 rounded-xl border border-accent bg-accent px-4 font-semibold text-[#06101f]"
-            onClick={() => void clone(query.trim())}
+            className="absolute right-2.5 top-1/2 flex size-6 -translate-y-1/2 items-center justify-center rounded-md text-muted hover:bg-line"
+            title="Clear"
+            aria-label="Clear"
+            onClick={() => setQuery('')}
           >
-            Clone
+            <X className="size-4" />
           </button>
-        ) : (
-          // Browse the repos you haven't added yet.
-          <button
-            className="flex min-h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-line bg-panel-2 text-muted"
-            title="Browse your repos"
-            aria-label="Browse your repos"
-            onClick={() => setBrowsing((b) => !b)}
-          >
-            <ChevronDown className={`size-4 transition-transform ${browsing ? 'rotate-180' : ''}`} />
-          </button>
+        ) : null}
+      </div>
+
+      {isUrl && (
+        <button
+          className="mt-3 min-h-11 shrink-0 rounded-xl border border-accent bg-accent px-4 font-semibold text-[#06101f]"
+          onClick={() => void clone(query.trim())}
+        >
+          Clone this URL
+        </button>
+      )}
+
+      <div ref={scroller} onScroll={onScroll} className="-mx-1 mt-2 min-h-0 flex-1 overflow-y-auto px-1">
+        {shown.length > 0 && (
+          <ul className="flex flex-col gap-1">
+            {shown.map((r) => (
+              <li key={r.nameWithOwner}>
+                <button
+                  className="flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left hover:bg-panel-2"
+                  onClick={() => void clone(r.cloneUrl)}
+                >
+                  <span className="flex size-9 shrink-0 items-center justify-center rounded-lg border border-line bg-panel-2 text-muted">
+                    {r.private ? <Lock className="size-4" /> : <Globe className="size-4" />}
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="flex items-center gap-1.5">
+                      <span className="truncate text-[14px] text-fg">{r.nameWithOwner}</span>
+                      {r.isOwn && (
+                        <span className="shrink-0 rounded-full border border-line px-1.5 py-px text-[10px] text-muted">yours</span>
+                      )}
+                    </span>
+                    {r.description && <span className="block truncate text-[12px] text-muted">{r.description}</span>}
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        {loading && suggestions.length === 0 && <SkeletonRows />}
+        {!loading && !isUrl && suggestions.length === 0 && (
+          <p className="px-2 py-8 text-center text-[13px] text-muted">
+            {repos.length === 0 ? 'No repos found — is GitHub configured?' : 'Nothing left to add here.'}
+          </p>
         )}
       </div>
 
-      {suggestions.length > 0 && (
-        <ul className="mt-2 flex flex-col gap-1">
-          {suggestions.map((r) => (
-            <li key={r.nameWithOwner}>
-              <button
-                className="flex w-full items-center justify-between rounded-lg border border-line bg-panel-2 px-3 py-2 text-left"
-                onClick={() => void clone(r.cloneUrl)}
-              >
-                <span className="min-w-0">
-                  <span className="block truncate text-[14px]">{r.nameWithOwner}</span>
-                  {r.description && <span className="block truncate text-[12px] text-muted">{r.description}</span>}
-                </span>
-                <span className="ml-2 shrink-0 text-[11px] text-muted">
-                  {r.isOwn ? 'yours' : ''} {r.private ? '· private' : ''}
-                </span>
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-
-      {loading && suggestions.length === 0 && <p className="mt-2 text-[13px] text-muted">loading…</p>}
-      {browsing && !loading && suggestions.length === 0 && (
-        <p className="mt-2 text-[13px] text-muted">
-          {repos.length === 0 ? 'No repos found (is GitHub configured?).' : 'You&rsquo;ve already added your recent repos — search for more.'}
-        </p>
-      )}
-
-      {pending && !pendingError && <p className="mt-2 text-[13px] text-accent">Cloning {pending}…</p>}
-      {pendingError && <p className="mt-2 text-[13px] text-del">{pending}: {pendingError}</p>}
-      {error && <p className="mt-2 text-[13px] text-del">{error}</p>}
+      {pending && !pendingError && <p className="mt-2 shrink-0 text-[13px] text-accent">Cloning {pending}…</p>}
+      {pendingError && <p className="mt-2 shrink-0 text-[13px] text-del">{pending}: {pendingError}</p>}
+      {error && <p className="mt-2 shrink-0 text-[13px] text-del">{error}</p>}
     </div>
+  )
+}
+
+/** Placeholder rows while the first fetch is in flight — no layout jump. */
+function SkeletonRows(): React.JSX.Element {
+  return (
+    <ul className="flex flex-col gap-1">
+      {Array.from({ length: 5 }, (_, i) => (
+        <li key={i} className="flex items-center gap-3 px-2 py-2">
+          <span className="size-9 shrink-0 animate-pulse rounded-lg bg-panel-2" />
+          <span className="flex-1">
+            <span className="block h-3.5 w-1/2 animate-pulse rounded bg-panel-2" />
+            <span className="mt-1.5 block h-3 w-3/4 animate-pulse rounded bg-panel-2" />
+          </span>
+        </li>
+      ))}
+    </ul>
   )
 }
 
@@ -269,8 +320,9 @@ function CreateForm({ failed }: { failed: Record<string, string> }): React.JSX.E
   }, [debounced])
 
   const pendingError = pending ? failed[pending] : undefined
+  const taken = !checking && check !== null && !check.available
   // With GitHub off, check is null — allow create (it becomes a local init server-side).
-  const canCreate = Boolean(name.trim()) && (check === null || check.available)
+  const canCreate = Boolean(name.trim()) && (check === null || check.available) && !pending
 
   async function create(): Promise<void> {
     setError(undefined)
@@ -284,52 +336,76 @@ function CreateForm({ failed }: { failed: Record<string, string> }): React.JSX.E
   }
 
   return (
-    <div>
-      <input
-        className={INPUT}
-        value={name}
-        placeholder="new-repo-name"
-        onChange={(e) => setName(e.target.value)}
-      />
-
-      <div className="mt-1 min-h-[18px] text-[12px]">
-        {checking && <span className="text-muted">checking…</span>}
-        {!checking && check?.available && <span className="text-add">available — {check.owner}/{check.name}</span>}
-        {!checking && check && !check.available && (
-          <span className="text-del">
-            {check.reason === 'exists-remote'
-              ? `${check.owner}/${check.name} already exists on GitHub`
-              : check.reason === 'exists-local'
-                ? 'a project with that name already exists here'
-                : 'not a valid name'}
-          </span>
-        )}
+    <div className="flex flex-col gap-4">
+      <div>
+        <label className="mb-1.5 block text-[12px] font-medium text-muted">Repository name</label>
+        <div
+          className={`flex items-center rounded-xl border bg-panel-2 ${
+            taken ? 'border-del' : 'border-line focus-within:border-accent'
+          }`}
+        >
+          {check?.owner && <span className="whitespace-nowrap pl-3 text-[15px] text-muted">{check.owner}/</span>}
+          <input
+            className="min-h-11 w-full bg-transparent px-3 text-[16px] text-fg outline-none"
+            value={name}
+            placeholder="new-repo-name"
+            autoCapitalize="none"
+            autoCorrect="off"
+            spellCheck={false}
+            onChange={(e) => setName(e.target.value)}
+          />
+          {checking && <Loader className="mr-3 size-4 shrink-0 animate-spin text-muted" />}
+          {!checking && check?.available && <Check className="mr-3 size-4 shrink-0 text-add" />}
+          {taken && <X className="mr-3 size-4 shrink-0 text-del" />}
+        </div>
+        <div className="mt-1.5 min-h-[16px] text-[12px]">
+          {check?.available && <span className="text-add">Available</span>}
+          {taken && (
+            <span className="text-del">
+              {check.reason === 'exists-remote'
+                ? 'Already exists on GitHub'
+                : check.reason === 'exists-local'
+                  ? 'A project with that name already exists here'
+                  : 'Not a valid name'}
+            </span>
+          )}
+        </div>
       </div>
 
-      <div className="mt-2 flex items-center gap-2">
-        <div className="flex overflow-hidden rounded-lg border border-line">
-          {(['private', 'public'] as const).map((v) => (
+      <div>
+        <label className="mb-1.5 block text-[12px] font-medium text-muted">Visibility</label>
+        <div className="grid grid-cols-2 gap-2">
+          {([
+            ['private', Lock, 'Only you'],
+            ['public', Globe, 'Anyone'],
+          ] as const).map(([v, Icon, sub]) => (
             <button
               key={v}
-              className={`px-3 py-2 text-[13px] ${visibility === v ? 'bg-accent text-[#06101f]' : 'bg-panel-2 text-muted'}`}
+              className={`flex items-center gap-2.5 rounded-xl border px-3 py-2.5 text-left ${
+                visibility === v ? 'border-accent bg-accent/10' : 'border-line bg-panel-2'
+              }`}
               onClick={() => setVisibility(v)}
             >
-              {v}
+              <Icon className={`size-4 shrink-0 ${visibility === v ? 'text-accent' : 'text-muted'}`} />
+              <span className="min-w-0">
+                <span className="block text-[14px] capitalize text-fg">{v}</span>
+                <span className="block text-[11px] text-muted">{sub}</span>
+              </span>
             </button>
           ))}
         </div>
-        <button
-          className="min-h-11 flex-1 rounded-xl border border-accent bg-accent font-semibold text-[#06101f] disabled:opacity-50"
-          disabled={!canCreate}
-          onClick={() => void create()}
-        >
-          Create
-        </button>
       </div>
 
-      {pending && !pendingError && <p className="mt-2 text-[13px] text-accent">Creating {pending}…</p>}
-      {pendingError && <p className="mt-2 text-[13px] text-del">{pending}: {pendingError}</p>}
-      {error && <p className="mt-2 text-[13px] text-del">{error}</p>}
+      <button
+        className="min-h-12 shrink-0 rounded-xl border border-accent bg-accent text-[15px] font-semibold text-[#06101f] disabled:opacity-50"
+        disabled={!canCreate}
+        onClick={() => void create()}
+      >
+        {pending ? 'Creating…' : 'Create repository'}
+      </button>
+
+      {pendingError && <p className="text-[13px] text-del">{pending}: {pendingError}</p>}
+      {error && <p className="text-[13px] text-del">{error}</p>}
     </div>
   )
 }
