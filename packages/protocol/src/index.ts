@@ -14,6 +14,11 @@ export interface EventEnvelope {
   seq: number
   sessionId: string
   projectId: string
+  /**
+   * The conversation this event belongs to (Phase 2.5). Absent on non-conversation
+   * events (project_created) and on legacy events from before threads existed.
+   */
+  threadId?: string
   /** epoch ms */
   ts: number
 }
@@ -108,13 +113,9 @@ export interface PromptRequest {
   text: string
   /** Which project this prompt targets. Each project keeps its own conversation. */
   projectId: string
-  /**
-   * Start a new Claude conversation instead of continuing the last one.
-   *
-   * Resuming is the default: Claude's memory lives in the agent process, and the
-   * server restarts constantly. Without resume, every restart silently forgets
-   * what you were talking about.
-   */
+  /** Which thread within the project (Phase 2.5). Its own conversation, resumed on demand. */
+  threadId?: string
+  /** Legacy reset flag; superseded by threads. Kept until the routes move to threads. */
   fresh?: boolean
 }
 
@@ -149,6 +150,31 @@ export interface Project {
   branch?: string
   /** From the `project_created` event, if we have one. */
   createdAt?: number
+}
+
+// --- Threads (Phase 2.5): per-project conversation history -----------------
+
+/** A conversation within a project, derived from the log. */
+export interface Thread {
+  id: string
+  projectId: string
+  /** First user prompt, truncated — the human-readable title. */
+  title: string
+  /** ms of the most recent event in the thread. */
+  lastActivity: number
+  messageCount: number
+  /** The legacy bucket: events from before threads existed (thread_id NULL). */
+  legacy?: boolean
+}
+
+/** GET /api/projects/:projectId/threads */
+export interface ThreadsResponse {
+  threads: Thread[]
+}
+
+/** POST /api/projects/:projectId/threads — start a fresh thread. */
+export interface NewThreadResponse {
+  threadId: string
 }
 
 /** GET /api/projects */

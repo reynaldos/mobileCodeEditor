@@ -6,6 +6,7 @@ interface Row {
   seq: number
   session_id: string
   project_id: string
+  thread_id: string | null
   ts: number
   type: string
   payload: string
@@ -42,14 +43,14 @@ export class EventLog {
   }
 
   append(event: NewEvent): Event {
-    const { sessionId, projectId, ts, type, ...body } = this.#redact(event)
+    const { sessionId, projectId, threadId, ts, type, ...body } = this.#redact(event)
 
     const info = this.#db
       .prepare(
-        `INSERT INTO events (session_id, project_id, ts, type, payload)
-         VALUES (?, ?, ?, ?, ?)`,
+        `INSERT INTO events (session_id, project_id, thread_id, ts, type, payload)
+         VALUES (?, ?, ?, ?, ?, ?)`,
       )
-      .run(sessionId, projectId, ts, type, JSON.stringify(body))
+      .run(sessionId, projectId, threadId ?? null, ts, type, JSON.stringify(body))
 
     const stored = { ...event, seq: Number(info.lastInsertRowid) } as Event
 
@@ -176,6 +177,90 @@ export class EventLog {
     return row?.id ?? undefined
   }
 
+  /**
+   * Threads in a project, newest activity first, derived from the log. Legacy
+   * events (thread_id NULL) collapse into one bucket flagged `legacy`.
+   *
+   * A thread only "exists" once it has a conversation event, so a freshly-minted
+   * thread with no prompt yet won't appear until its first message — which is what
+   * the client wants (empty threads aren't worth listing).
+   */
+  threadsOf(projectId: string): Array<{
+    id: string | null
+    title: string
+    lastActivity: number
+    messageCount: number
+  }> {
+    const rows = this.#db
+      .prepare(
+        `SELECT thread_id AS id, MAX(ts) AS lastActivity, COUNT(*) AS messageCount
+           FROM events
+          WHERE project_id = ?
+            AND type NOT IN ('project_created', 'project_create_failed')
+          GROUP BY thread_id
+          ORDER BY lastActivity DESC`,
+      )
+      .all(projectId) as Array<{ id: string | null; lastActivity: number; messageCount: number }>
+
+    // Title (first prompt) is computed per group — cleaner than a correlated
+    // subquery once NULL thread_ids are in play.
+    return rows.map((r) => ({
+      id: r.id,
+      title: this.#firstPromptOf(projectId, r.id) ?? '(no messages yet)',
+      lastActivity: r.lastActivity,
+      messageCount: r.messageCount,
+    }))
+  }
+
+  #firstPromptOf(projectId: string, threadId: string | null): string | undefined {
+    const row = this.#db
+      .prepare(
+        `SELECT json_extract(payload, '$.text') AS text
+           FROM events
+          WHERE project_id = ? AND type = 'user_prompt'
+            AND thread_id IS ${threadId === null ? 'NULL' : '?'}
+          ORDER BY seq ASC LIMIT 1`,
+      )
+      .get(...(threadId === null ? [projectId] : [projectId, threadId])) as { text: string | null } | undefined
+    return row?.text ?? undefined
+  }
+
+  /** The Claude session id for native `resume` of a specific thread. */
+  latestClaudeSessionIdOfThread(threadId: string): string | undefined {
+    const row = this.#db
+      .prepare(
+        `SELECT json_extract(payload, '$.claudeSessionId') AS id
+           FROM events
+          WHERE type = 'session_started' AND thread_id = ?
+          ORDER BY seq DESC LIMIT 1`,
+      )
+      .get(threadId) as { id: string | null } | undefined
+    return row?.id ?? undefined
+  }
+
+  /** A thread's prompts and replies, oldest first — the material for a recap. */
+  threadMessages(
+    projectId: string,
+    threadId: string | null,
+  ): Array<{ role: 'user' | 'assistant'; text: string }> {
+    const rows = this.#db
+      .prepare(
+        `SELECT type, json_extract(payload, '$.text') AS text
+           FROM events
+          WHERE project_id = ?
+            AND thread_id IS ${threadId === null ? 'NULL' : '?'}
+            AND type IN ('user_prompt', 'assistant_text')
+          ORDER BY seq ASC`,
+      )
+      .all(...(threadId === null ? [projectId] : [projectId, threadId])) as Array<{
+      type: string
+      text: string | null
+    }>
+    return rows
+      .filter((r) => r.text)
+      .map((r) => ({ role: r.type === 'user_prompt' ? ('user' as const) : ('assistant' as const), text: r.text! }))
+  }
+
   /** Project-creation events, for the picker's "created how / when". */
   projectCreations(): Array<{ name: string; repoUrl?: string; ts: number }> {
     return this.#db
@@ -201,6 +286,7 @@ function toEvent(row: Row): Event {
     seq: row.seq,
     sessionId: row.session_id,
     projectId: row.project_id,
+    ...(row.thread_id ? { threadId: row.thread_id } : {}),
     ts: row.ts,
     type: row.type,
     ...(JSON.parse(row.payload) as object),
