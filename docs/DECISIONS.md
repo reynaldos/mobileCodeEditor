@@ -395,3 +395,49 @@ file.
 `overflow-wrap-anywhere` (not a real class) and caught it only by grepping the built CSS.
 Nothing in the toolchain will tell you. When a style mysteriously doesn't apply, check the
 generated stylesheet before you debug anything else.
+
+---
+
+## 21. Deploy on Fly, with Tailscale inside the container
+
+Where the always-on box lives, decided after the fact (Phase 0's docs assumed a VM). The
+container was always the portable unit ([#13](#13-single-tenant-and-multi-tenancy-would-live-in-front)),
+so this is a deploy-target choice, not an architecture change.
+
+**Free was the goal; free lost to capacity.** Oracle Cloud's Always Free A1 (arm) is the only
+free tier with enough RAM. We built the whole VM runbook ([DEPLOY-ORACLE.md](DEPLOY-ORACLE.md))
+and hit "Out of host capacity" across every availability domain — the well-known Oracle
+free-arm lottery. Free A1 is home-region-only and the home region is fixed, so switching
+regions doesn't escape it. The honest options were: fight the lottery with an auto-retry
+script, or pay. We paid.
+
+**Fly over a plain VPS** (Hetzner would also have worked, cheaper) because Fly is the one that
+grows into the multi-tenant future: a Machine *is* a per-user workspace container, Firecracker
+gives the isolation [#13](#13-single-tenant-and-multi-tenancy-would-live-in-front) said you'd
+need, and `fly deploy` builds the image fresh for the target arch — so the arm-vs-amd concern
+that haunted the VM path simply vanished. Cost: ~$5–10/mo. Fly has **no free tier** (retired
+2024); "free" and "Fly" don't coexist, and that was named before committing.
+
+**Tailscale moved inside the container.** On a VM, `tailscale serve` ran on the host. Fly has
+no host — the container is the unit — so the image carries `tailscaled` and brings it up in
+userspace mode (no `/dev/net/tun`, no root), gated on `TS_AUTHKEY` so local and VM runs are
+untouched. This *preserves* the security model exactly: nothing on `*.fly.dev`, no auth on the
+server, Tailscale is the perimeter. It was the one piece untestable before deploy; it came up
+clean and `mce` joined the tailnet beside the phone and Mac.
+
+**Not Vercel for the frontend**, though it comes up naturally. The frontend isn't a separate
+deployable — it's static files the workspace server serves, same-origin, which is what deleted
+CORS, the SSE-CORS special case, mixed content, and push/service-worker scope. Hosting it on
+Vercel would force the backend public (exposing an unauthenticated agent), reinstate CORS, and
+buy nothing. Vercel's real fit is the *far-future multi-tenant front door* — marketing, auth,
+billing — never the workspace containers. See [#19](#19-react--vite-not-nextjs).
+
+**One volume, everything under `/data`.** Fly Machines allow exactly one volume per machine.
+The event log, the cloned projects (`/data/projects`), and Tailscale state (`/data/tailscale`)
+all live under it. `PROJECT_PATH` became overridable to point there; the VM/local default of
+`/projects` still holds. An empty volume self-populates: the entrypoint clones `PROJECT_REPO`
+on first boot.
+
+**Would change our mind:** going truly multi-tenant re-opens all of this — per-user Machines,
+a control plane in front, and the Tailscale-per-container model gives way to a real ingress.
+That's [#13](#13-single-tenant-and-multi-tenancy-would-live-in-front), still a different product.

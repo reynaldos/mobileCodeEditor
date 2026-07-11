@@ -7,24 +7,23 @@ This is **not** a mobile port of VS Code. On a phone you aren't writing code, yo
 directing an agent and reviewing what it did. So the primary surface is a conversation
 with inline diffs you approve with your thumb — not an editor.
 
-## Status
+## Status — running in production
 
-**Phase 0 is done.** The acceptance criterion is met: a prompt sent from a phone over
-Tailscale, a diff approved with a thumb, the change landed on disk — then Safari backgrounded,
-the app closed, and the session picked up exactly where it left off. `Last-Event-ID` did the
-work; nothing was lost.
+It works, on-device, off the laptop. You direct Claude from your phone, approve diffs with
+your thumb, get pushed when it needs you, and it commits and pushes to GitHub **as you** —
+against a container on Fly.io that never sleeps.
 
-Installed to the home screen, which is also the context iOS requires for Phase 1's web push.
+Shipped: Phase 0 (the one-screen MVP, on-device acceptance passed), a New conversation button,
+Phase 1 (web push, on-device), the Tailwind 4 migration, containerization, and the Fly deploy
+— Tailscale runs inside the container, so nothing is public and there's no server auth to
+build. 85 tests pass.
 
-**Phase 1 is done.** Web push works end to end: the installed PWA subscribes, and when Claude
-hits an approval the phone buzzes even with Safari backgrounded and the screen locked. Tapping
-the notification opens straight to the pending card. Verified on-device over Tailscale.
+**Next:** wire up CI/CD (the workflow's written — needs the repo on GitHub + a `FLY_API_TOKEN`
+secret), then **Phase 2 — projects** so you can work on more than one repo. The full picture,
+milestones, and reasoning are in **[docs/ROADMAP.md](docs/ROADMAP.md)**.
 
-Not done, and deliberately so: the container. `docker build` has never once been run. Docker
-buys durability, not the answer these phases existed to ask.
-
-Next: the file browser and a real editor (Phase 3), or the terminal — whatever you reach for
-first. See [ROADMAP.md](docs/ROADMAP.md).
+Deploy runbooks: **[docs/DEPLOY-FLY.md](docs/DEPLOY-FLY.md)** (what's running) and
+[docs/DEPLOY-ORACLE.md](docs/DEPLOY-ORACLE.md) (the free-tier alternative we tried first).
 
 ## Quickstart
 
@@ -62,8 +61,18 @@ curl -X POST localhost:3000/api/_debug/event -H 'content-type: application/json'
 curl -N -H 'Last-Event-ID: 1' localhost:3000/api/events
 ```
 
-`pnpm -r test` runs 25 tests covering replay semantics, boot recovery, redaction, the
-reducer, and the diff.
+`pnpm -r test` runs 85 tests covering replay semantics, boot recovery, redaction, the agent
+session and approval bridge, resume/reset, the notifier and push fan-out, the reducer, and
+the diff.
+
+To run the whole thing the way it runs in production — one container, one origin, no Vite:
+
+```bash
+cp .env.example config/.env   # secrets only; see docs/DEPLOY-FLY.md
+docker compose up --build     # localhost:3000, reachable over `tailscale serve`
+```
+
+Deploying it to an always-on box is [docs/DEPLOY-FLY.md](docs/DEPLOY-FLY.md).
 
 ## Shape
 
@@ -93,13 +102,16 @@ container is the unit of everything, and Tailscale membership is authentication.
 
 | Doc | What's in it |
 |---|---|
+| [ROADMAP.md](docs/ROADMAP.md) | **Where we are**, what shipped, recommended next steps |
+| [DECISIONS.md](docs/DECISIONS.md) | Every load-bearing choice and why — read this before disagreeing with one |
 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) | System design, data model, session lifecycle, security posture |
 | [PROTOCOL.md](docs/PROTOCOL.md) | Event union, HTTP surface, SSE resume contract |
-| [ROADMAP.md](docs/ROADMAP.md) | Phased plan from MVP outward |
-| [DECISIONS.md](docs/DECISIONS.md) | Every load-bearing choice and why — read this before disagreeing with one |
+| [PHASE-0.md](docs/PHASE-0.md) · [PHASE-1.md](docs/PHASE-1.md) | Build logs for the MVP and push notifications, incl. what real use turned up |
+| [DEPLOY-FLY.md](docs/DEPLOY-FLY.md) | The production deploy (what's running) |
+| [DEPLOY-ORACLE.md](docs/DEPLOY-ORACLE.md) | The free-tier alternative we tried first |
 
-Start with DECISIONS.md. Most of the architecture only makes sense once you know what it
-was chosen against.
+Start with ROADMAP.md for where things stand, then DECISIONS.md — most of the architecture
+only makes sense once you know what it was chosen against.
 
 ## Stack
 

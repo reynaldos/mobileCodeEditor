@@ -240,8 +240,13 @@ died with the process; there's nothing to resolve.
 
 ## Networking
 
-Tailscale runs on the **host**, not in the container. Container ports bind to the host;
-`tailscale serve` terminates TLS.
+Tailscale terminates TLS and is the perimeter — but *where it runs* depends on the host:
+
+- **VM / local:** Tailscale runs on the **host**; container ports bind to the host and
+  `tailscale serve` fronts them. (This is what the diagram below shows.)
+- **Fly (production):** there is no host, so `tailscaled` runs **inside the container** in
+  userspace mode, gated on `TS_AUTHKEY`. Same result — nothing on `*.fly.dev`, no server auth.
+  See [DECISIONS #21](DECISIONS.md) and [DEPLOY-FLY.md](DEPLOY-FLY.md).
 
 ```
 https://box.ts.net           → localhost:3000   workspace server (app + API)
@@ -250,7 +255,7 @@ https://box.ts.net:5174      → localhost:5174   project B dev server
 ```
 
 Nothing is publicly exposed. There is no certificate to manage. Authentication is tailnet
-membership.
+membership — the reason the server needs no login of its own.
 
 Preview gets a **port per project**, not a path prefix — a dev server under
 `/preview/name/` breaks on absolute asset paths. Assign the port in project settings rather
