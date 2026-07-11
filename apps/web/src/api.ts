@@ -10,6 +10,7 @@ import type {
   ProjectsResponse,
   PromptRequest,
   PromptResponse,
+  RenameThreadRequest,
   Thread,
   ThreadsResponse,
 } from '@mce/protocol'
@@ -67,6 +68,31 @@ export async function fetchThreads(projectId: string): Promise<Thread[]> {
 export async function createThread(projectId: string): Promise<string> {
   const res = await post<NewThreadResponse>(`/api/projects/${encodeURIComponent(projectId)}/threads`, {})
   return res!.threadId
+}
+
+const threadUrl = (projectId: string, threadId: string): string =>
+  `${BASE}/api/projects/${encodeURIComponent(projectId)}/threads/${encodeURIComponent(threadId)}`
+
+async function expectOk(response: Response): Promise<void> {
+  if (response.ok) return
+  const detail = await response.json().catch(() => ({}) as { error?: string })
+  throw new ApiError(response.status, detail.error ?? response.statusText)
+}
+
+/** Give a thread a custom title. 204 on success. */
+export async function renameThread(projectId: string, threadId: string, title: string): Promise<void> {
+  await expectOk(
+    await fetch(threadUrl(projectId, threadId), {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ title } satisfies RenameThreadRequest),
+    }),
+  )
+}
+
+/** Hide a thread from the list (the log keeps its events). 204 on success. */
+export async function deleteThread(projectId: string, threadId: string): Promise<void> {
+  await expectOk(await fetch(threadUrl(projectId, threadId), { method: 'DELETE' }))
 }
 
 /** The projects the picker shows. Authoritative — the server reads disk. */

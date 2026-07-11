@@ -1,7 +1,7 @@
 import { LEGACY_THREAD_ID } from '@mce/protocol'
-import { ChevronDown, History } from 'lucide-react'
+import { ChevronDown, History, MessageSquarePlus } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
-import { fetchHealth, type Health } from './api.ts'
+import { deleteThread, fetchHealth, type Health, renameThread } from './api.ts'
 import { MessageList } from './components/MessageList.tsx'
 import { NotificationsButton } from './components/NotificationsButton.tsx'
 import { ProjectPicker } from './components/ProjectPicker.tsx'
@@ -64,8 +64,20 @@ export function App(): React.JSX.Element {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.lastSeq])
 
-  const activeThread = threads.find((t) => t.id === activeThreadId)
   const isLegacy = activeThreadId === LEGACY_THREAD_ID
+
+  async function onRenameThread(threadId: string, title: string): Promise<void> {
+    if (!activeProjectId) return
+    await renameThread(activeProjectId, threadId, title).catch(() => undefined)
+    await refreshThreads()
+  }
+
+  async function onDeleteThread(threadId: string): Promise<void> {
+    if (!activeProjectId) return
+    await deleteThread(activeProjectId, threadId).catch(() => undefined)
+    if (threadId === activeThreadId) startNewThread()
+    await refreshThreads()
+  }
   const view = viewOf(state, activeThreadId)
   const agent = AGENT[view.agent]
   const projectName = projects.find((p) => p.id === activeProjectId)?.name
@@ -82,14 +94,27 @@ export function App(): React.JSX.Element {
 
         <div className="flex shrink-0 items-center gap-2.5">
           {activeProjectId && (
-            <button
-              className="flex items-center text-muted"
-              title="Previous threads"
-              aria-label="Previous threads"
-              onClick={() => setOverlay('threads')}
-            >
-              <History className="size-[18px]" />
-            </button>
+            <>
+              <button
+                className="flex items-center text-muted"
+                title="New thread"
+                aria-label="New thread"
+                onClick={() => {
+                  startNewThread()
+                  setOverlay(null)
+                }}
+              >
+                <MessageSquarePlus className="size-[18px]" />
+              </button>
+              <button
+                className="flex items-center text-muted"
+                title="Previous threads"
+                aria-label="Previous threads"
+                onClick={() => setOverlay((o) => (o === 'threads' ? null : 'threads'))}
+              >
+                <History className="size-[18px]" />
+              </button>
+            </>
           )}
           <NotificationsButton />
           <span className={`size-2 shrink-0 rounded-full ${CONNECTION[connection]}`} title={connection} />
@@ -136,18 +161,15 @@ export function App(): React.JSX.Element {
 
       {overlay === 'threads' && activeProjectId && (
         <ThreadList
-          projectName={projectName ?? activeProjectId}
           threads={threads}
           activeThreadId={activeThreadId}
           onSelect={(id) => {
             setActiveThreadId(id)
             setOverlay(null)
           }}
-          onNew={() => {
-            startNewThread()
-            setOverlay(null)
-          }}
-          onBack={() => setOverlay('projects')}
+          onRename={(id, title) => void onRenameThread(id, title)}
+          onDelete={(id) => void onDeleteThread(id)}
+          onClose={() => setOverlay(null)}
         />
       )}
     </div>
