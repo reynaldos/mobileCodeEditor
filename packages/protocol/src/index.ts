@@ -72,12 +72,19 @@ export type EventBody =
       message?: string
     }
   /**
+   * A project's setup began (Phase 2.6): clone/init, then dependency install. A
+   * small, durable marker — the live output streams elsewhere (see BuildStream).
+   * Its purpose is persistence: a client that reloads or returns later sees a
+   * `started` with no terminal event and knows the build is still running.
+   */
+  | { type: 'project_create_started'; name: string; repoUrl?: string }
+  /**
    * A project was cloned or created (Phase 2). The `projectId` on the envelope is
    * the new project. Recorded in the log — the picker derives "created how / when"
    * from it — while the filesystem stays the source of truth for *existence*.
    */
   | { type: 'project_created'; name: string; repoUrl?: string }
-  /** Clone/init failed; the partial directory is cleaned up. */
+  /** Clone/init failed (or was cancelled); the partial directory is cleaned up. */
   | { type: 'project_create_failed'; name: string; error: string }
   /** A thread was given a custom title (Phase 2.5). threadId on the envelope. */
   | { type: 'thread_renamed'; title: string }
@@ -217,6 +224,34 @@ export interface CreateProjectRequest {
 export interface CreateProjectResponse {
   projectId: string
 }
+
+// --- Build progress (Phase 2.6): live setup output over its own SSE ----------
+
+/**
+ * Where a project's setup is. `cloning`/`installing` are in-flight; `ready`,
+ * `error`, and `cancelled` are terminal. This rides a dedicated, non-durable
+ * stream (GET /api/projects/:id/build) — the raw git/npm output is high-volume
+ * and must never bloat the durable event log.
+ */
+export type BuildPhase = 'cloning' | 'installing' | 'ready' | 'error' | 'cancelled'
+
+/** The full state of an in-progress (or recently finished) build. */
+export interface BuildSnapshot {
+  projectId: string
+  phase: BuildPhase
+  /** Terminal output so far, oldest first (ring-buffered on the server). */
+  lines: string[]
+  /** Set when `phase === 'error'` (or `'cancelled'`). */
+  error?: string
+  /** Non-fatal note, e.g. the clone succeeded but dependency install failed. */
+  warning?: string
+}
+
+/** Messages on GET /api/projects/:id/build. A `snapshot` arrives first. */
+export type BuildStreamMessage =
+  | { type: 'snapshot'; snapshot: BuildSnapshot }
+  | { type: 'line'; line: string }
+  | { type: 'phase'; phase: BuildPhase; error?: string; warning?: string }
 
 // --- GitHub integration, for the picker's clone/create forms ---------------
 

@@ -4,6 +4,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { after, test } from 'node:test'
+import { BuildTracker } from './build-tracker.ts'
 import type { Config } from './config.ts'
 import { openDb } from './db.ts'
 import { EventLog } from './log.ts'
@@ -45,11 +46,13 @@ async function boot(config: Config = DEV): Promise<{ base: string; log: EventLog
   const db = openDb(':memory:')
   const log = new EventLog(db, makeRedactor([]))
   const pushStore = new PushStore(db)
-  const projects = new ProjectStore(config.projectsRoot, log)
+  const builds = new BuildTracker()
+  const projects = new ProjectStore(config.projectsRoot, log, undefined, builds)
   const app = await buildServer(config, {
     log,
     sessions: new SessionManager(log, config, projects),
     projects,
+    builds,
     github: undefined,
     pushStore,
     pusher: new Pusher(pushStore, config.vapid),

@@ -283,6 +283,24 @@ export class EventLog {
       .map((r) => ({ role: r.type === 'user_prompt' ? ('user' as const) : ('assistant' as const), text: r.text! }))
   }
 
+  /**
+   * Builds that started and never reached a terminal event — the process died
+   * mid-setup. Recovered on boot into a `project_create_failed`, like sessions.
+   */
+  interruptedBuilds(): string[] {
+    const rows = this.#db
+      .prepare(
+        `SELECT DISTINCT project_id AS id
+           FROM events
+          WHERE type = 'project_create_started'
+            AND project_id NOT IN (
+                  SELECT project_id FROM events
+                   WHERE type IN ('project_created', 'project_create_failed'))`,
+      )
+      .all() as Array<{ id: string }>
+    return rows.map((r) => r.id)
+  }
+
   /** Project-creation events, for the picker's "created how / when". */
   projectCreations(): Array<{ name: string; repoUrl?: string; ts: number }> {
     return this.#db

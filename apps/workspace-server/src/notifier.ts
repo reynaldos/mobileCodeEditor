@@ -78,6 +78,18 @@ export class Notifier {
         }
         return
 
+      // Project setup is long-running and often backgrounded — always notify when
+      // it finishes, success or failure. A user-initiated cancel is not news.
+      case 'project_created':
+        void this.#send({ title: 'Project ready', body: `${event.name} finished setting up.`, tag: `build-${event.name}` })
+        return
+
+      case 'project_create_failed':
+        if (event.error !== 'Cancelled') {
+          void this.#send({ title: 'Project setup failed', body: `${event.name}: ${event.error}`, tag: `build-${event.name}` })
+        }
+        return
+
       default:
         return
     }
