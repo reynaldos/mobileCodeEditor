@@ -20,7 +20,7 @@ const lock = await acquireLock(`${config.dbPath}.lock`)
 const db = openDb(config.dbPath)
 const log = new EventLog(db, makeRedactor(secretsOf(config)))
 const projects = new ProjectStore(config.projectsRoot, log)
-const sessions = new SessionManager(log, config)
+const sessions = new SessionManager(log, config, projects)
 const pushStore = new PushStore(db)
 const pusher = new Pusher(pushStore, config.vapid)
 

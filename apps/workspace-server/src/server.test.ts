@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
-import { mkdtempSync, writeFileSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { after, test } from 'node:test'
@@ -44,10 +45,11 @@ async function boot(config: Config = DEV): Promise<{ base: string; log: EventLog
   const db = openDb(':memory:')
   const log = new EventLog(db, makeRedactor([]))
   const pushStore = new PushStore(db)
+  const projects = new ProjectStore(config.projectsRoot, log)
   const app = await buildServer(config, {
     log,
-    sessions: new SessionManager(log, config),
-    projects: new ProjectStore(config.projectsRoot, log),
+    sessions: new SessionManager(log, config, projects),
+    projects,
     pushStore,
     pusher: new Pusher(pushStore, config.vapid),
   })
@@ -166,7 +168,7 @@ test('approving something that is not pending is a 409, not a silent success', a
   assert.equal(response.status, 409)
 })
 
-test('prompting without a token is a 503 that says what to do', async () => {
+test('prompting without a projectId is a 400', async () => {
   const { base } = await boot()
   const response = await fetch(`${base}/api/prompt`, {
     method: 'POST',
@@ -174,6 +176,50 @@ test('prompting without a token is a 503 that says what to do', async () => {
     body: JSON.stringify({ text: 'hello' }),
   })
 
+  assert.equal(response.status, 400)
+  assert.match(((await response.json()) as { error: string }).error, /projectId/)
+})
+
+test('prompting an unknown project is a 404', async () => {
+  const { base } = await boot()
+  const response = await fetch(`${base}/api/prompt`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ text: 'hello', projectId: 'ghost' }),
+  })
+
+  assert.equal(response.status, 404)
+})
+
+test('prompting a real project without a token is a 503 that says what to do', async () => {
+  // Give the projects root one real project so we reach the token check.
+  const root = mkdtempSync(join(tmpdir(), 'mce-proot-'))
+  mkdirSync(join(root, 'app'))
+  execFileSync('git', ['-C', join(root, 'app'), 'init', '-q'])
+
+  const { base } = await boot({ ...DEV, projectsRoot: root })
+  const response = await fetch(`${base}/api/prompt`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ text: 'hello', projectId: 'app' }),
+  })
+
   assert.equal(response.status, 503)
   assert.match(((await response.json()) as { error: string }).error, /CLAUDE_CODE_OAUTH_TOKEN/)
+})
+
+test('GET /api/projects lists projects; POST creates one', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'mce-proot-'))
+  const { base } = await boot({ ...DEV, projectsRoot: root })
+
+  const empty = (await (await fetch(`${base}/api/projects`)).json()) as { projects: unknown[] }
+  assert.deepEqual(empty.projects, [])
+
+  const created = await fetch(`${base}/api/projects`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ name: 'fresh' }),
+  })
+  assert.equal(created.status, 202)
+  assert.equal(((await created.json()) as { projectId: string }).projectId, 'fresh')
 })

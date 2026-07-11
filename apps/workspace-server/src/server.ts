@@ -40,12 +40,9 @@ export async function buildServer(config: Config, services: Services): Promise<F
 
   app.get('/api/health', async () => ({
     ok: true,
-    projectId: config.projectId,
-    projectPath: config.projectPath,
     lastSeq: log.lastSeq(),
-    sessionId: sessions.currentSessionId ?? null,
-    // The conversation your next prompt would continue. null means a clean start.
-    resumes: sessions.resumableConversationId ?? null,
+    projectCount: projects.list().length,
+    liveSessions: sessions.liveSessionCount,
     agentReady: Boolean(config.claudeToken),
     pushReady: pusher.enabled,
   }))

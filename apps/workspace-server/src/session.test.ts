@@ -56,7 +56,15 @@ const fakeQuery = (gen: (params: QueryParams) => AsyncGenerator<SDKMessage, void
 
 function makeSession(queryFn: QueryFn): { session: AgentSession; log: EventLog } {
   const log = new EventLog(openDb(':memory:'), makeRedactor([]))
-  return { session: new AgentSession({ id: 's1', log, config: CONFIG, queryFn }), log }
+  const session = new AgentSession({
+    id: 's1',
+    log,
+    config: CONFIG,
+    projectId: 'test',
+    projectPath: CONFIG.projectPath,
+    queryFn,
+  })
+  return { session, log }
 }
 
 const types = (log: EventLog): string[] => log.replaySince(0).map((e) => e.type)

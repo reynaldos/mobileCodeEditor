@@ -46,6 +46,10 @@ export interface AgentSessionOptions {
   readonly id: string
   readonly log: EventLog
   readonly config: Config
+  /** Which project this session works in. Every event it appends is tagged with it. */
+  readonly projectId: string
+  /** The project's directory — the agent's `cwd`. */
+  readonly projectPath: string
   /** A Claude session id from a previous, interrupted run. */
   readonly resume?: string
   /** Injected in tests. Defaults to the real SDK. */
@@ -54,9 +58,11 @@ export interface AgentSessionOptions {
 
 export class AgentSession {
   readonly id: string
+  readonly projectId: string
 
   readonly #log: EventLog
   readonly #config: Config
+  readonly #projectPath: string
   readonly #resume: string | undefined
   readonly #queryFn: QueryFn
 
@@ -73,8 +79,10 @@ export class AgentSession {
 
   constructor(opts: AgentSessionOptions) {
     this.id = opts.id
+    this.projectId = opts.projectId
     this.#log = opts.log
     this.#config = opts.config
+    this.#projectPath = opts.projectPath
     this.#resume = opts.resume
     this.#queryFn = opts.queryFn ?? query
   }
@@ -96,7 +104,7 @@ export class AgentSession {
       // Streaming input: follow-up prompts feed the SAME conversation.
       prompt: this.#queue,
       options: {
-        cwd: this.#config.projectPath,
+        cwd: this.#projectPath,
         canUseTool: this.#canUseTool,
         // 'default' is what makes canUseTool get consulted at all.
         permissionMode: 'default',
@@ -335,7 +343,7 @@ export class AgentSession {
   #append(body: EventBody): void {
     this.#log.append({
       sessionId: this.id,
-      projectId: this.#config.projectId,
+      projectId: this.projectId,
       ts: Date.now(),
       ...body,
     } as NewEvent)

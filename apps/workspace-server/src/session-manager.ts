@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import type { Config } from './config.ts'
 import type { EventLog } from './log.ts'
+import type { ProjectStore } from './projects.ts'
 import { AgentSession, type QueryFn } from './session.ts'
 
 export type ApprovalOutcome = 'ok' | 'not_pending'
@@ -10,33 +11,43 @@ export interface PromptOptions {
   fresh?: boolean
 }
 
+export class UnknownProjectError extends Error {
+  // Assigned in the body, not as a constructor parameter property — Node's
+  // type-stripping is strip-only and cannot synthesize those.
+  readonly projectId: string
+  constructor(projectId: string) {
+    super(`no project "${projectId}"`)
+    this.name = 'UnknownProjectError'
+    this.projectId = projectId
+  }
+}
+
 /**
- * Holds one session in the MVP and a Map anyway, because going to N sessions
- * should be a lookup rather than a refactor of module-level globals.
- * See DECISIONS #14.
+ * One live agent session per project, keyed by `projectId`. The Map was always
+ * the plan — going from one project to N is a lookup, not a refactor of
+ * module-level globals. See DECISIONS #14.
+ *
+ * Each project resumes its own Claude conversation independently, because the
+ * log keys everything by `project_id` + `session_id`.
  */
 export class SessionManager {
   readonly #sessions = new Map<string, AgentSession>()
   readonly #log: EventLog
   readonly #config: Config
+  readonly #projects: ProjectStore
   readonly #queryFn: QueryFn | undefined
 
-  #currentId: string | undefined
-
-  constructor(log: EventLog, config: Config, queryFn?: QueryFn) {
+  constructor(log: EventLog, config: Config, projects: ProjectStore, queryFn?: QueryFn) {
     this.#log = log
     this.#config = config
+    this.#projects = projects
     this.#queryFn = queryFn
   }
 
   /**
-   * The log outlives the process; live promises and generators do not.
-   *
-   * Expire approvals first — each was a promise nobody can resolve now — then
-   * close the sessions that were mid-generator when we died.
-   *
-   * Nothing here decides what to resume. That is read from the log at the
-   * moment a session starts, so a clean shutdown and a crash behave the same.
+   * The log outlives the process; live promises and generators do not. Expire
+   * parked approvals (each was a promise nobody can resolve now), then close the
+   * sessions that were mid-generator when we died — across all projects.
    */
   recoverOnBoot(): void {
     for (const { approvalId, sessionId, projectId } of this.#log.pendingApprovals()) {
@@ -56,41 +67,39 @@ export class SessionManager {
   }
 
   /**
-   * Feeds the live session, or starts one that continues the last conversation.
+   * Feeds the project's live session, or starts one that continues its last
+   * conversation. Resuming is the default; `fresh` is the explicit reset.
    *
-   * Claude's memory lives in the agent process, not in our log. Restarting the
-   * server therefore forgets everything unless we hand `resume` back — and the
-   * server restarts constantly, both from `node --watch` and from deploys. So
-   * resuming is the default and a fresh start is the explicit request.
+   * @throws UnknownProjectError if the project doesn't exist.
    */
-  async prompt(text: string, options: PromptOptions = {}): Promise<string> {
-    if (options.fresh) await this.newConversation()
+  async prompt(projectId: string, text: string, options: PromptOptions = {}): Promise<string> {
+    const path = this.#projects.pathOf(projectId)
+    if (!path || !this.#projects.exists(projectId)) throw new UnknownProjectError(projectId)
 
-    const live = this.#liveSession()
-    const session = live ?? this.#startSession(this.#lastConversation())
+    if (options.fresh) await this.newConversation(projectId)
 
+    const session = this.#liveSession(projectId) ?? this.#startSession(projectId, path)
     session.prompt(text)
     return session.id
   }
 
   /**
-   * Ends the live session and draws a line in the log. The next prompt starts a
-   * conversation Claude has no memory of.
-   *
-   * The line is an event, not a field. `#lastConversation()` reads it back, so
-   * a reset survives a restart for free — like everything else here.
+   * Ends the project's live session and draws a line in the log. The next prompt
+   * for that project starts a conversation Claude has no memory of. The line is
+   * an event, so it survives a restart for free. See DECISIONS #5.
    */
-  async newConversation(): Promise<void> {
-    const sessionId = this.#currentId
-    await this.#endCurrent()
+  async newConversation(projectId: string): Promise<void> {
+    const live = this.#liveSession(projectId)
+    const sessionId = live?.id
+    if (live) await live.stop()
+    this.#sessions.delete(projectId)
 
     this.#log.append({
       type: 'conversation_reset',
       sessionId: sessionId ?? 'system',
-      projectId: this.#config.projectId,
+      projectId,
       ts: Date.now(),
     })
-    this.#currentId = undefined
   }
 
   resolveApproval(approvalId: string, allow: boolean, reason?: string): ApprovalOutcome {
@@ -100,13 +109,16 @@ export class SessionManager {
     return 'not_pending'
   }
 
-  get currentSessionId(): string | undefined {
-    return this.#currentId
+  /** The conversation a new prompt to this project would continue, if any. */
+  resumableConversationIdOf(projectId: string): string | undefined {
+    return this.#log.latestClaudeSessionId(projectId)
   }
 
-  /** The conversation a new session would continue, or undefined if there is none. */
-  get resumableConversationId(): string | undefined {
-    return this.#lastConversation()
+  /** How many projects have a live session — for /api/health. */
+  get liveSessionCount(): number {
+    let n = 0
+    for (const projectId of this.#sessions.keys()) if (this.#liveSession(projectId)) n++
+    return n
   }
 
   async shutdown(): Promise<void> {
@@ -116,43 +128,33 @@ export class SessionManager {
 
   // -------------------------------------------------------------------------
 
-  /**
-   * Read from the log, not from memory. A session that ended cleanly is just as
-   * resumable as one the process died during — the distinction only ever
-   * mattered because we used to recover it during boot.
-   */
-  #lastConversation(): string | undefined {
-    return this.#log.latestClaudeSessionId()
-  }
-
-  #liveSession(): AgentSession | undefined {
-    if (!this.#currentId) return undefined
-    const session = this.#sessions.get(this.#currentId)
+  #liveSession(projectId: string): AgentSession | undefined {
+    const session = this.#sessions.get(projectId)
     if (!session) return undefined
 
-    const dead = session.status === 'ended' || session.status === 'error' || session.status === 'interrupted'
-    return dead ? undefined : session
+    const dead =
+      session.status === 'ended' || session.status === 'error' || session.status === 'interrupted'
+    if (dead) {
+      this.#sessions.delete(projectId)
+      return undefined
+    }
+    return session
   }
 
-  async #endCurrent(): Promise<void> {
-    const live = this.#liveSession()
-    if (!live) return
-    await live.stop()
-  }
-
-  #startSession(resume: string | undefined): AgentSession {
-    const id = randomUUID()
+  #startSession(projectId: string, projectPath: string): AgentSession {
+    const resume = this.#log.latestClaudeSessionId(projectId)
     const session = new AgentSession({
-      id,
+      id: randomUUID(),
       log: this.#log,
       config: this.#config,
+      projectId,
+      projectPath,
       ...(resume ? { resume } : {}),
       ...(this.#queryFn ? { queryFn: this.#queryFn } : {}),
     })
 
     session.start()
-    this.#sessions.set(id, session)
-    this.#currentId = id
+    this.#sessions.set(projectId, session)
     return session
   }
 }

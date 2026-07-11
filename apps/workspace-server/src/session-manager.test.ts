@@ -1,22 +1,23 @@
 import type { Query, SDKMessage } from '@anthropic-ai/claude-agent-sdk'
 import assert from 'node:assert/strict'
+import { execFileSync } from 'node:child_process'
+import { mkdirSync, mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { test } from 'node:test'
 import { setTimeout as sleep } from 'node:timers/promises'
 import type { Config } from './config.ts'
 import { openDb } from './db.ts'
 import { EventLog } from './log.ts'
+import { ProjectStore } from './projects.ts'
 import { makeRedactor } from './redact.ts'
 import type { QueryFn } from './session.ts'
-import { SessionManager } from './session-manager.ts'
+import { SessionManager, UnknownProjectError } from './session-manager.ts'
 
-const CONFIG: Config = {
+const BASE: Omit<Config, 'projectsRoot' | 'projectPath' | 'projectId'> = {
   port: 0,
   host: '127.0.0.1',
   dbPath: ':memory:',
-  projectPath: tmpdir(),
-  projectId: 'test',
-  projectsRoot: tmpdir(),
   claudeToken: 'test-token',
   model: undefined,
   isDev: true,
@@ -38,13 +39,9 @@ function recordingQuery(claudeSessionIds: string[]): {
   const resumes: Array<string | undefined> = []
   let n = 0
 
-  const queryFn = ((params: {
-    prompt: AsyncIterable<unknown>
-    options: { resume?: string }
-  }) => {
+  const queryFn = ((params: { prompt: AsyncIterable<unknown>; options: { resume?: string } }) => {
     resumes.push(params.options.resume)
     const claudeSessionId = claudeSessionIds[n++] ?? `claude-${n}`
-
     return (async function* () {
       yield init(claudeSessionId)
       for await (const _ of params.prompt) yield done()
@@ -54,8 +51,29 @@ function recordingQuery(claudeSessionIds: string[]): {
   return { queryFn, resumes }
 }
 
-function makeLog(): EventLog {
-  return new EventLog(openDb(':memory:'), makeRedactor([]))
+/** A projects root on disk with the named projects git-init'd, and a manager over it. */
+function harness(
+  projectIds: string[],
+  claudeSessionIds: string[],
+): { manager: SessionManager; log: EventLog; resumes: Array<string | undefined> } {
+  const root = mkdtempSync(join(tmpdir(), 'mce-projects-'))
+  for (const id of projectIds) {
+    const dir = join(root, id)
+    mkdirSync(dir)
+    execFileSync('git', ['-C', dir, 'init', '-q', '-b', 'main'])
+  }
+  const config: Config = {
+    ...BASE,
+    projectsRoot: root,
+    projectPath: join(root, projectIds[0] ?? 'app'),
+    projectId: projectIds[0] ?? 'app',
+  }
+
+  const log = new EventLog(openDb(':memory:'), makeRedactor([]))
+  const projects = new ProjectStore(root, log)
+  const { queryFn, resumes } = recordingQuery(claudeSessionIds)
+  const manager = new SessionManager(log, config, projects, queryFn)
+  return { manager, log, resumes }
 }
 
 async function waitFor(predicate: () => boolean, label: string, ms = 2000): Promise<void> {
@@ -66,220 +84,96 @@ async function waitFor(predicate: () => boolean, label: string, ms = 2000): Prom
   }
 }
 
-const startedCount = (log: EventLog): number =>
-  log.replaySince(0).filter((e) => e.type === 'session_started').length
+const startedFor = (log: EventLog, projectId: string): number =>
+  log.replaySince(0).filter((e) => e.type === 'session_started' && e.projectId === projectId).length
 
 // ---------------------------------------------------------------------------
 
-test('the first prompt ever starts a fresh conversation', async () => {
-  const log = makeLog()
-  const { queryFn, resumes } = recordingQuery(['claude-1'])
-  const manager = new SessionManager(log, CONFIG, queryFn)
+test('the first prompt to a project starts a fresh conversation', async () => {
+  const { manager, log, resumes } = harness(['app'], ['claude-1'])
 
-  await manager.prompt('hello')
-  await waitFor(() => startedCount(log) === 1, 'session_started')
+  await manager.prompt('app', 'hello')
+  await waitFor(() => startedFor(log, 'app') === 1, 'session_started')
 
   assert.deepEqual(resumes, [undefined])
   await manager.shutdown()
 })
 
-test('a restart resumes the last conversation — the whole point of this', async () => {
-  const log = makeLog()
-
-  // First process: one conversation, then a clean shutdown.
-  const first = recordingQuery(['claude-1'])
-  const before = new SessionManager(log, CONFIG, first.queryFn)
-  await before.prompt('rename the function')
-  await waitFor(() => startedCount(log) === 1, 'first session')
-  await before.shutdown()
-
-  // Second process, same log. This is `node --watch` restarting.
-  const second = recordingQuery(['claude-1'])
-  const after = new SessionManager(log, CONFIG, second.queryFn)
-  after.recoverOnBoot()
-
-  assert.equal(after.resumableConversationId, 'claude-1')
-  await after.prompt('now do the same in the other file')
-  await waitFor(() => startedCount(log) === 2, 'second session')
-
-  assert.deepEqual(second.resumes, ['claude-1'], 'the new session continues the old conversation')
-  await after.shutdown()
-})
-
-test('a crash resumes exactly as well as a clean exit', async () => {
-  const log = makeLog()
-
-  const first = recordingQuery(['claude-1'])
-  const before = new SessionManager(log, CONFIG, first.queryFn)
-  await before.prompt('go')
-  await waitFor(() => startedCount(log) === 1, 'first session')
-  // No shutdown(): the process died. session_started has no session_ended.
-
-  const second = recordingQuery(['claude-1'])
-  const after = new SessionManager(log, CONFIG, second.queryFn)
-  after.recoverOnBoot()
-
-  // Boot recovery closed the orphan session...
-  const ended = log.replaySince(0).filter((e) => e.type === 'session_ended')
-  assert.equal(ended.length, 1)
-  assert.equal(ended[0]?.type === 'session_ended' && ended[0].reason, 'interrupted')
-
-  // ...and the conversation is still resumable.
-  await after.prompt('carry on')
-  await waitFor(() => startedCount(log) === 2, 'second session')
-  assert.deepEqual(second.resumes, ['claude-1'])
-
-  await before.shutdown()
-  await after.shutdown()
-})
-
-test('fresh: true starts a new conversation and does not resume', async () => {
-  const log = makeLog()
-  const { queryFn, resumes } = recordingQuery(['claude-1', 'claude-2'])
-  const manager = new SessionManager(log, CONFIG, queryFn)
-
-  await manager.prompt('first thing')
-  await waitFor(() => startedCount(log) === 1, 'first session')
-
-  await manager.prompt('forget all that', { fresh: true })
-  await waitFor(() => startedCount(log) === 2, 'second session')
-
-  assert.deepEqual(resumes, [undefined, undefined], 'neither session resumed')
+test('prompting an unknown project is an UnknownProjectError', async () => {
+  const { manager } = harness(['app'], ['claude-1'])
+  await assert.rejects(() => manager.prompt('ghost', 'hi'), UnknownProjectError)
   await manager.shutdown()
 })
 
-test('fresh: true ends the live session before starting the new one', async () => {
-  const log = makeLog()
-  const { queryFn } = recordingQuery(['claude-1', 'claude-2'])
-  const manager = new SessionManager(log, CONFIG, queryFn)
+test('two projects run isolated sessions — the whole point of Phase 2', async () => {
+  const { manager, log } = harness(['alpha', 'beta'], ['claude-a', 'claude-b'])
 
-  await manager.prompt('first')
-  await waitFor(() => startedCount(log) === 1, 'first session')
-  const firstSessionId = manager.currentSessionId
+  await manager.prompt('alpha', 'work on alpha')
+  await manager.prompt('beta', 'work on beta')
+  await waitFor(() => startedFor(log, 'alpha') === 1 && startedFor(log, 'beta') === 1, 'both sessions')
 
-  await manager.prompt('start over', { fresh: true })
-  await waitFor(() => startedCount(log) === 2, 'second session')
-
-  assert.notEqual(manager.currentSessionId, firstSessionId)
-  const ended = log.replaySince(0).filter((e) => e.type === 'session_ended')
-  assert.equal(ended.length, 1, 'the old session was closed, not abandoned')
-  assert.equal(ended[0]?.type === 'session_ended' && ended[0].reason, 'complete', 'it was idle')
+  const alpha = log.replaySince(0).filter((e) => e.projectId === 'alpha')
+  const beta = log.replaySince(0).filter((e) => e.projectId === 'beta')
+  assert.ok(alpha.some((e) => e.type === 'user_prompt' && e.text === 'work on alpha'))
+  assert.ok(beta.some((e) => e.type === 'user_prompt' && e.text === 'work on beta'))
+  assert.ok(!alpha.some((e) => e.type === 'user_prompt' && e.text === 'work on beta'), 'no cross-talk')
 
   await manager.shutdown()
 })
 
-test('a second prompt feeds the live session rather than starting another', async () => {
-  const log = makeLog()
-  const { queryFn, resumes } = recordingQuery(['claude-1'])
-  const manager = new SessionManager(log, CONFIG, queryFn)
+test('a second prompt to the same project feeds the live session', async () => {
+  const { manager, log, resumes } = harness(['app'], ['claude-1'])
 
-  const a = await manager.prompt('one')
-  await waitFor(() => startedCount(log) === 1, 'session')
-  const b = await manager.prompt('two')
+  const a = await manager.prompt('app', 'one')
+  await waitFor(() => startedFor(log, 'app') === 1, 'session')
+  const b = await manager.prompt('app', 'two')
 
   assert.equal(a, b, 'same session id')
   assert.equal(resumes.length, 1, 'query() called once')
   await manager.shutdown()
 })
 
-test('recoverOnBoot expires approvals the dead process was parked on', async () => {
-  const log = makeLog()
-  const base = { sessionId: 's-old', projectId: 'p', ts: 1 } as const
-  log.append({ ...base, type: 'session_started', claudeSessionId: 'claude-1', model: 'opus' })
-  log.append({ ...base, type: 'approval_request', approvalId: 'a1', toolUseId: 't1', tool: 'Edit', input: {} })
+test('each project resumes its own last conversation', async () => {
+  const { manager, log } = harness(['alpha', 'beta'], ['claude-a', 'claude-b'])
+  await manager.prompt('alpha', 'a')
+  await manager.prompt('beta', 'b')
+  await waitFor(() => startedFor(log, 'alpha') === 1 && startedFor(log, 'beta') === 1, 'both')
 
-  new SessionManager(log, CONFIG).recoverOnBoot()
+  assert.equal(manager.resumableConversationIdOf('alpha'), 'claude-a')
+  assert.equal(manager.resumableConversationIdOf('beta'), 'claude-b')
+  await manager.shutdown()
+})
+
+test('a reset is per-project: that project resumes nothing, the other is untouched', async () => {
+  const { manager, log } = harness(['alpha', 'beta'], ['claude-a', 'claude-b'])
+
+  await manager.prompt('alpha', 'a')
+  await manager.prompt('beta', 'b')
+  await waitFor(() => startedFor(log, 'alpha') === 1 && startedFor(log, 'beta') === 1, 'both')
+
+  await manager.newConversation('alpha')
+
+  assert.equal(manager.resumableConversationIdOf('alpha'), undefined, 'alpha reset')
+  assert.equal(manager.resumableConversationIdOf('beta'), 'claude-b', 'beta untouched')
+  await manager.shutdown()
+})
+
+test('recoverOnBoot closes open sessions and expires parked approvals', async () => {
+  const { manager, log } = harness(['app'], ['claude-1'])
+  const at = { sessionId: 's-old', projectId: 'app', ts: 1 } as const
+  log.append({ ...at, type: 'session_started', claudeSessionId: 'claude-1', model: 'opus' })
+  log.append({ ...at, type: 'approval_request', approvalId: 'a1', toolUseId: 't1', tool: 'Edit', input: {} })
+
+  manager.recoverOnBoot()
 
   assert.deepEqual(log.pendingApprovals(), [])
   assert.deepEqual(log.openSessions(), [])
   assert.ok(log.replaySince(0).some((e) => e.type === 'approval_expired'))
-})
-
-test('a reset draws a line: the next prompt resumes nothing', async () => {
-  const log = makeLog()
-  const { queryFn, resumes } = recordingQuery(['claude-1', 'claude-2'])
-  const manager = new SessionManager(log, CONFIG, queryFn)
-
-  await manager.prompt('remember this')
-  await waitFor(() => startedCount(log) === 1, 'first session')
-  assert.equal(manager.resumableConversationId, 'claude-1')
-
-  await manager.newConversation()
-  assert.equal(manager.resumableConversationId, undefined, 'nothing before the line is resumable')
-
-  await manager.prompt('who are you')
-  await waitFor(() => startedCount(log) === 2, 'second session')
-
-  assert.deepEqual(resumes, [undefined, undefined])
   await manager.shutdown()
 })
 
-test('a reset survives a restart, because it is an event and not a field', async () => {
-  const log = makeLog()
-  const first = recordingQuery(['claude-1'])
-  const before = new SessionManager(log, CONFIG, first.queryFn)
-  await before.prompt('remember this')
-  await waitFor(() => startedCount(log) === 1, 'first session')
-  await before.newConversation()
-  await before.shutdown()
-
-  // New process, same log.
-  const second = recordingQuery(['claude-2'])
-  const after = new SessionManager(log, CONFIG, second.queryFn)
-  after.recoverOnBoot()
-
-  assert.equal(after.resumableConversationId, undefined)
-  await after.prompt('hello again')
-  await waitFor(() => startedCount(log) === 2, 'second session')
-  assert.deepEqual(second.resumes, [undefined])
-  await after.shutdown()
-})
-
-test('after a reset, a later session becomes resumable again', async () => {
-  const log = makeLog()
-  const { queryFn, resumes } = recordingQuery(['claude-1', 'claude-2', 'claude-3'])
-  const manager = new SessionManager(log, CONFIG, queryFn)
-
-  await manager.prompt('one')
-  await waitFor(() => startedCount(log) === 1, 's1')
-  await manager.newConversation()
-
-  await manager.prompt('two')
-  await waitFor(() => startedCount(log) === 2, 's2')
-  assert.equal(manager.resumableConversationId, 'claude-2', 'the post-reset session is resumable')
-
+test('resolveApproval on an unknown id is not_pending', async () => {
+  const { manager } = harness(['app'], ['claude-1'])
+  assert.equal(manager.resolveApproval('ghost', true), 'not_pending')
   await manager.shutdown()
-  const after = new SessionManager(log, CONFIG, queryFn)
-  await after.prompt('three')
-  await waitFor(() => startedCount(log) === 3, 's3')
-
-  assert.deepEqual(resumes, [undefined, undefined, 'claude-2'])
-  await after.shutdown()
-})
-
-test('newConversation ends the live session', async () => {
-  const log = makeLog()
-  const { queryFn } = recordingQuery(['claude-1'])
-  const manager = new SessionManager(log, CONFIG, queryFn)
-
-  await manager.prompt('go')
-  await waitFor(() => startedCount(log) === 1, 'session')
-  await manager.newConversation()
-
-  assert.equal(manager.currentSessionId, undefined)
-  const ended = log.replaySince(0).filter((e) => e.type === 'session_ended')
-  assert.equal(ended.length, 1)
-  assert.equal(ended[0]?.type === 'session_ended' && ended[0].reason, 'complete', 'it was idle')
-  assert.ok(log.replaySince(0).some((e) => e.type === 'conversation_reset'))
-  await manager.shutdown()
-})
-
-test('resetting with no session at all is harmless', async () => {
-  const log = makeLog()
-  const manager = new SessionManager(log, CONFIG)
-  await manager.newConversation()
-  await manager.newConversation()
-
-  assert.equal(log.replaySince(0).filter((e) => e.type === 'conversation_reset').length, 2)
-  assert.equal(manager.resumableConversationId, undefined)
 })

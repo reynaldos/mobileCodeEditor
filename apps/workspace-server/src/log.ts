@@ -147,17 +147,19 @@ export class EventLog {
    * talking. Recovered from the log rather than a table — the log is the only
    * durable state, so this survives a crash exactly as well as a clean exit.
    */
-  latestClaudeSessionId(): string | undefined {
+  latestClaudeSessionId(projectId: string): string | undefined {
     const row = this.#db
       .prepare(
         `SELECT json_extract(payload, '$.claudeSessionId') AS id
            FROM events
-          WHERE type = 'session_started'
-            -- A reset draws a line. Nothing before it is resumable.
-            AND seq > COALESCE((SELECT MAX(seq) FROM events WHERE type = 'conversation_reset'), 0)
+          WHERE type = 'session_started' AND project_id = @projectId
+            -- A reset draws a line, per project. Nothing before it is resumable.
+            AND seq > COALESCE(
+                  (SELECT MAX(seq) FROM events
+                    WHERE type = 'conversation_reset' AND project_id = @projectId), 0)
           ORDER BY seq DESC LIMIT 1`,
       )
-      .get() as { id: string | null } | undefined
+      .get({ projectId }) as { id: string | null } | undefined
     return row?.id ?? undefined
   }
 
