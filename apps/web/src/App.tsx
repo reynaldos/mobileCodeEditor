@@ -1,7 +1,8 @@
 import { LEGACY_THREAD_ID } from '@mce/protocol'
 import { ChevronDown, History, KeyRound, MessageCirclePlus, MonitorPlay } from 'lucide-react'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { deleteThread, fetchHealth, type Health, renameThread } from './api.ts'
+import { ActionsMenu } from './components/ActionsMenu.tsx'
 import { BuildModal } from './components/BuildModal.tsx'
 import { EnvDrawer } from './components/EnvDrawer.tsx'
 import { MessageList } from './components/MessageList.tsx'
@@ -9,6 +10,7 @@ import { NotificationsButton } from './components/NotificationsButton.tsx'
 import { PreviewDrawer } from './components/PreviewDrawer.tsx'
 import { ProjectPicker } from './components/ProjectPicker.tsx'
 import { PromptBox } from './components/PromptBox.tsx'
+import { StatusDot } from './components/StatusDot.tsx'
 import { ThreadList } from './components/ThreadList.tsx'
 import { viewOf } from './events.ts'
 import { useBuilds } from './useBuilds.ts'
@@ -52,6 +54,14 @@ export function App(): React.JSX.Element {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.removed.length])
 
+  // New conversation activity can include a branch change (e.g. the agent runs
+  // `git checkout`) — refetch the project list so the header's branch subtitle
+  // stays live instead of only updating on the next full reload.
+  useEffect(() => {
+    void projectsState.refresh()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.lastSeq])
+
   // Selecting (or restoring) a project starts a fresh thread by default; you
   // reach previous threads through the history icon.
   useEffect(() => {
@@ -82,6 +92,13 @@ export function App(): React.JSX.Element {
   const view = viewOf(state, activeThreadId)
   const activeProject = projects.find((p) => p.id === activeProjectId)
   const projectName = activeProject?.name
+  // Every thread the event log has seen gets a live `agent` projection (see
+  // events.ts), not just the active one — so the history list can flag threads
+  // still actively working without any extra fetching.
+  const workingThreadIds = useMemo(
+    () => new Set(Object.entries(state.byThread).filter(([, s]) => s.agent === 'thinking').map(([id]) => id)),
+    [state.byThread],
+  )
   // While a project sets up, the build modal replaces the thread — leaving the
   // header usable so you can switch away and come back to it, still building.
   const showBuild = activeProjectId !== null && builds.shouldShow(activeProjectId)
@@ -92,6 +109,7 @@ export function App(): React.JSX.Element {
       <header className="flex shrink-0 items-center justify-between gap-3 border-b border-line bg-panel px-3.5 pb-2.5 pt-[calc(10px+env(safe-area-inset-top,0px))]">
         <button className="flex min-w-0 flex-col items-start" onClick={() => setOverlay('projects')} title="Switch project">
           <span className="flex min-w-0 items-center gap-1.5">
+            {activeProjectId && <StatusDot agent={view.agent} />}
             <span className="truncate font-semibold">{projectName ?? 'Projects'}</span>
             <ChevronDown className="size-4 shrink-0 text-muted" />
           </span>
@@ -100,45 +118,41 @@ export function App(): React.JSX.Element {
 
         <div className="flex shrink-0 items-center gap-2.5">
           {activeProjectId && (
-            <>
-              <button
-                className="flex items-center text-muted"
-                title="Previous threads"
-                aria-label="Previous threads"
-                onClick={() => setOverlay((o) => (o === 'threads' ? null : 'threads'))}
-              >
-                <History className="size-[18px]" />
-              </button>
-              <button
-                className="flex items-center text-muted"
-                title="New thread"
-                aria-label="New thread"
-                onClick={() => {
-                  startNewThread()
-                  setOverlay(null)
-                }}
-              >
-                <MessageCirclePlus className="size-[18px]" />
-              </button>
-              <button
-                className="flex items-center text-muted"
-                title="Environment (.env)"
-                aria-label="Environment"
-                onClick={() => setEnvOpen(true)}
-              >
-                <KeyRound className="size-[18px]" />
-              </button>
-              {activeProject?.previewSupported && (
-                <button
-                  className="flex items-center text-muted"
-                  title="Preview"
-                  aria-label="Preview"
-                  onClick={() => activeProjectId && preview.request(activeProjectId)}
-                >
-                  <MonitorPlay className="size-[18px]" />
-                </button>
-              )}
-            </>
+            <ActionsMenu
+              actions={[
+                {
+                  key: 'threads',
+                  label: 'Previous threads',
+                  icon: History,
+                  onClick: () => setOverlay((o) => (o === 'threads' ? null : 'threads')),
+                },
+                {
+                  key: 'new-thread',
+                  label: 'New thread',
+                  icon: MessageCirclePlus,
+                  onClick: () => {
+                    startNewThread()
+                    setOverlay(null)
+                  },
+                },
+                {
+                  key: 'env',
+                  label: 'Environment (.env)',
+                  icon: KeyRound,
+                  onClick: () => setEnvOpen(true),
+                },
+                ...(activeProject?.previewSupported
+                  ? [
+                      {
+                        key: 'preview',
+                        label: 'Preview',
+                        icon: MonitorPlay,
+                        onClick: () => activeProjectId && preview.request(activeProjectId),
+                      },
+                    ]
+                  : []),
+              ]}
+            />
           )}
           <NotificationsButton />
         </div>
@@ -213,6 +227,7 @@ export function App(): React.JSX.Element {
         <ThreadList
           threads={threads}
           activeThreadId={activeThreadId}
+          workingThreadIds={workingThreadIds}
           onSelect={(id) => {
             setActiveThreadId(id)
             setOverlay(null)

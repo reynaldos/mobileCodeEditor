@@ -5,6 +5,8 @@ import { useMemo, useState } from 'react'
 interface Props {
   threads: Thread[]
   activeThreadId: string | null
+  /** Thread ids the agent is actively working in right now — drives the flashing dot. */
+  workingThreadIds: Set<string>
   onSelect: (threadId: string) => void
   onRename: (threadId: string, title: string) => void
   onDelete: (threadId: string) => void
@@ -18,7 +20,15 @@ interface Props {
  * on touch, just look) reveals rename and delete. The legacy "earlier
  * conversation" bucket is read-only — you can open it, not edit it.
  */
-export function ThreadList({ threads, activeThreadId, onSelect, onRename, onDelete, onClose }: Props): React.JSX.Element {
+export function ThreadList({
+  threads,
+  activeThreadId,
+  workingThreadIds,
+  onSelect,
+  onRename,
+  onDelete,
+  onClose,
+}: Props): React.JSX.Element {
   const [query, setQuery] = useState('')
 
   const filtered = useMemo(() => {
@@ -51,6 +61,7 @@ export function ThreadList({ threads, activeThreadId, onSelect, onRename, onDele
               key={t.id}
               thread={t}
               active={t.id === activeThreadId}
+              working={workingThreadIds.has(t.id)}
               onSelect={() => onSelect(t.id)}
               onRename={(title) => onRename(t.id, title)}
               onDelete={() => onDelete(t.id)}
@@ -72,12 +83,14 @@ type RowMode = 'idle' | 'editing' | 'confirm-delete'
 function Row({
   thread,
   active,
+  working,
   onSelect,
   onRename,
   onDelete,
 }: {
   thread: Thread
   active: boolean
+  working: boolean
   onSelect: () => void
   onRename: (title: string) => void
   onDelete: () => void
@@ -119,8 +132,11 @@ function Row({
       className={`group flex items-center rounded-lg ${active ? 'bg-panel-2' : 'hover:bg-panel-2'}`}
     >
       <button className="min-w-0 flex-1 px-2 py-2 text-left" onClick={onSelect}>
-        <span className={`block truncate text-[14px] ${active ? 'font-medium text-fg' : 'text-fg'}`}>
-          {thread.title}
+        <span className="flex min-w-0 items-center gap-1.5">
+          {working && (
+            <span className="size-1.5 shrink-0 rounded-full bg-accent animate-pulse-dot" title="Working…" />
+          )}
+          <span className={`truncate text-[14px] ${active ? 'font-medium text-fg' : 'text-fg'}`}>{thread.title}</span>
         </span>
         <span className="block text-[11px] text-muted">{thread.legacy ? 'read-only' : when(thread.lastActivity)}</span>
       </button>

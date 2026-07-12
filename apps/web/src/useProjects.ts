@@ -8,8 +8,10 @@ const ACTIVE_KEY = 'mce.activeProject'
  * The project list (authoritative — the server reads disk) and the active
  * selection, persisted in localStorage so a reload stays on the same project.
  *
- * `refresh` is called on load and whenever a `project_created` event lands, so a
- * slow clone appears in the picker the moment it finishes.
+ * `refresh` is called on load, whenever a `project_created`/`project_removed`
+ * event lands (App.tsx), and on every conversation event thereafter — the
+ * latter is what keeps the header's branch subtitle live when the agent
+ * changes branches mid-session, since there's no dedicated branch-change event.
  */
 export function useProjects(): {
   projects: Project[]
