@@ -42,6 +42,7 @@ const HEADING_CLASS: Record<number, string> = {
 const HEADING_RE = /^(#{1,4})\s+(.*)$/
 const ORDERED_RE = /^\d+[.)]\s+(.*)$/
 const BULLET_RE = /^[-*]\s+(.*)$/
+const FENCE_RE = /^```(\S*)$/
 const STRUCTURAL_RE = [HEADING_RE, ORDERED_RE, BULLET_RE]
 const isStructural = (line: string): boolean => STRUCTURAL_RE.some((re) => re.test(line))
 
@@ -56,6 +57,36 @@ export function Markdown({ text }: { text: string }): React.JSX.Element {
     if (line === undefined) break
     if (!line.trim()) {
       i++
+      continue
+    }
+
+    const fence = FENCE_RE.exec(line.trim())
+    if (fence) {
+      const lang = fence[1] ?? ''
+      const rows: string[] = []
+      i++
+      while (i < lines.length) {
+        const cur = lines[i]
+        if (cur === undefined || FENCE_RE.test(cur.trim())) {
+          i++
+          break
+        }
+        rows.push(cur)
+        i++
+      }
+      const k = key++
+      blocks.push(
+        <div key={k} className="overflow-hidden rounded-md border border-line bg-panel-2">
+          {lang && (
+            <div className="border-b border-line px-2.5 py-1 font-mono text-[11px] uppercase tracking-wide text-muted">
+              {lang}
+            </div>
+          )}
+          <pre className="overflow-x-auto p-2.5 font-mono text-[12.5px] leading-snug">
+            <code>{rows.join('\n')}</code>
+          </pre>
+        </div>,
+      )
       continue
     }
 
