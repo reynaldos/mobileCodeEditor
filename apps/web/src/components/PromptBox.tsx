@@ -1,6 +1,7 @@
-import { ArrowUp, Maximize2, Minimize2, Plus, X } from 'lucide-react'
+import { ArrowUp, Maximize2, Plus, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { sendPrompt, uploadImages } from '../api.ts'
+import { Drawer, DrawerContent, DrawerDescription, DrawerHeader, DrawerTitle } from './ui/drawer.tsx'
 
 /** Mirrors workspace-server's UploadStore — kept in sync by hand since the
  *  protocol package is types-only (no runtime exports). Fast local rejection
@@ -32,6 +33,7 @@ export function PromptBox({
   const [sending, setSending] = useState(false)
   const [error, setError] = useState<string | undefined>()
   const [isMultiline, setIsMultiline] = useState(false)
+  const [isOverflowing, setIsOverflowing] = useState(false)
   const [expanded, setExpanded] = useState(false)
   const ready = Boolean(projectId && threadId && !disabledReason)
 
@@ -67,6 +69,10 @@ export function PromptBox({
     // past that means the box has actually grown, whether from an explicit
     // newline or the line simply wrapping.
     setIsMultiline(scrollHeight > 44)
+    // Only once content would actually be clipped by the max-height do we
+    // offer the full drawer — a couple of wrapped lines still fit fine in
+    // the compact bar, so there's no need to nudge the user toward it yet.
+    setIsOverflowing(scrollHeight > 160)
   }, [text, expanded])
 
   // Re-focus after switching modes — the compact and expanded views render
@@ -208,6 +214,17 @@ export function PromptBox({
     </button>
   )
 
+  const expandButton = (
+    <button
+      type="button"
+      aria-label="Expand"
+      onClick={() => setExpanded(true)}
+      className="grid size-9 shrink-0 place-items-center rounded-full text-muted"
+    >
+      <Maximize2 size={16} />
+    </button>
+  )
+
   const textareaCommonProps = {
     ref: textareaRef,
     value: text,
@@ -241,63 +258,79 @@ export function PromptBox({
         }}
       />
 
-      {expanded ? (
-        <div className="fixed inset-0 z-50 flex flex-col bg-panel">
-          <div className="relative flex min-h-0 flex-1 flex-col px-3 pt-[calc(12px+env(safe-area-inset-top,0px))]">
-            <button
-              type="button"
-              aria-label="Collapse"
-              onClick={() => setExpanded(false)}
-              className="absolute top-[calc(12px+env(safe-area-inset-top,0px))] right-3 z-10 grid size-8 place-items-center rounded-full bg-panel-2 text-muted"
-            >
-              <Minimize2 size={16} />
-            </button>
-            {error && <p className="mb-2 shrink-0 text-[13px] text-del">{error}</p>}
-            {imagesStrip}
-            <textarea
-              {...textareaCommonProps}
-              className="prompt-input min-h-0 flex-1 resize-none bg-transparent pt-1 pr-10 pb-2 text-fg outline-none"
-            />
-          </div>
-          {/* `prompt-bar` here (not just in the compact view below) is what the
-           *  `.app:has(.prompt-input:focus) .prompt-bar` rule in styles.css
-           *  keys off to drop the redundant safe-area padding once the
-           *  keyboard is up. */}
-          <div className="prompt-bar flex shrink-0 items-center justify-between gap-1 border-t border-line px-3 py-2 pb-[calc(10px+env(safe-area-inset-bottom,0px))]">
-            {addPhotoButton}
-            {sendButton}
-          </div>
-        </div>
-      ) : (
+      {/* Hidden (not unmounted-by-ternary into the drawer) while expanded, so
+       *  there's only ever one mounted <textarea ref={textareaRef}> at a time —
+       *  the drawer below mounts its own only once `expanded` flips true. */}
+      {!expanded && (
         // `prompt-bar` is targeted by a :has() rule that drops the safe-area padding
         // once the keyboard has lifted the app. See styles.css.
         <div className="prompt-bar shrink-0 border-t border-line bg-panel px-3 pt-2.5 pb-[calc(10px+env(safe-area-inset-bottom,0px))]">
           {error && <p className="mb-2 text-[13px] text-del">{error}</p>}
           {imagesStrip}
 
-          <div className="relative">
-            {isMultiline && (
-              <button
-                type="button"
-                aria-label="Expand"
-                onClick={() => setExpanded(true)}
-                className="absolute top-2 right-2 z-10 grid size-7 place-items-center rounded-full bg-panel-2 text-muted shadow-sm"
-              >
-                <Maximize2 size={14} />
-              </button>
+          <div
+            className={
+              isMultiline
+                ? 'flex flex-col gap-0.5 rounded-3xl border border-line bg-panel-2 p-1 focus-within:border-accent'
+                : 'flex items-end gap-1 rounded-3xl border border-line bg-panel-2 py-1.5 pr-1.5 pl-1 focus-within:border-accent'
+            }
+          >
+            {isMultiline ? (
+              <>
+                {/* Text stays top-anchored and left-aligned with the `+` button
+                 *  below it; the buttons get their own row so they never crowd
+                 *  the last line of text. */}
+                <textarea
+                  {...textareaCommonProps}
+                  rows={1}
+                  className="prompt-input max-h-40 min-h-9 resize-none bg-transparent px-2 pt-1.5 pb-1 text-fg outline-none"
+                />
+                <div className="flex shrink-0 items-center justify-between px-0.5 pb-0.5">
+                  {addPhotoButton}
+                  <div className="flex items-center gap-1">
+                    {isOverflowing && expandButton}
+                    {sendButton}
+                  </div>
+                </div>
+              </>
+            ) : (
+              <>
+                {addPhotoButton}
+                <textarea
+                  {...textareaCommonProps}
+                  rows={1}
+                  className="prompt-input max-h-40 min-h-9 flex-1 resize-none bg-transparent px-1 py-1.5 text-fg outline-none"
+                />
+                {sendButton}
+              </>
             )}
-            <div className="flex items-end gap-1 rounded-3xl border border-line bg-panel-2 py-1.5 pr-1.5 pl-1 focus-within:border-accent">
-              {addPhotoButton}
-              <textarea
-                {...textareaCommonProps}
-                rows={1}
-                className="prompt-input max-h-40 min-h-9 flex-1 resize-none bg-transparent px-1 py-1.5 text-fg outline-none"
-              />
-              {sendButton}
-            </div>
           </div>
         </div>
       )}
+
+      {/* The drawer handles its own overlay, drag-to-dismiss, and (via vaul's
+       *  built-in VisualViewport tracking) keyboard avoidance — no need to
+       *  hand-roll any of that here the way the old fixed-position take did. */}
+      <Drawer open={expanded} onOpenChange={setExpanded}>
+        <DrawerContent className="mt-0 h-[80vh] max-h-[80vh]">
+          <DrawerHeader className="sr-only">
+            <DrawerTitle>Prompt</DrawerTitle>
+            <DrawerDescription>Write a longer prompt for Claude.</DrawerDescription>
+          </DrawerHeader>
+          <div className="flex min-h-0 flex-1 flex-col px-4 pt-2">
+            {error && <p className="mb-2 shrink-0 text-[13px] text-del">{error}</p>}
+            {imagesStrip}
+            <textarea
+              {...textareaCommonProps}
+              className="prompt-input min-h-0 flex-1 resize-none bg-transparent pb-2 text-fg outline-none"
+            />
+          </div>
+          <div className="flex shrink-0 items-center justify-between gap-1 border-t border-line px-4 py-2 pb-[calc(10px+env(safe-area-inset-bottom,0px))]">
+            {addPhotoButton}
+            {sendButton}
+          </div>
+        </DrawerContent>
+      </Drawer>
     </>
   )
 }
