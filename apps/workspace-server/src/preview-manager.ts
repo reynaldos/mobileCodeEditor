@@ -1,9 +1,11 @@
 import { spawn, type ChildProcess } from 'node:child_process'
+import { existsSync } from 'node:fs'
 import net from 'node:net'
+import { join } from 'node:path'
 import type { Config } from './config.ts'
 import type { EventLog } from './log.ts'
 import type { Presence } from './presence.ts'
-import { detectDevCommand, type ProjectStore } from './projects.ts'
+import { detectDevCommand, type DevCommand, type ProjectStore } from './projects.ts'
 import type { PreviewTracker } from './preview-tracker.ts'
 
 /** How often we poll the fixed port while waiting for the dev server to bind. */
@@ -113,34 +115,34 @@ export class PreviewManager {
     this.#tracker.start(projectId, dev.framework)
     this.#appendEvent(projectId, { type: 'preview_started' })
 
-    // Vite: confirmed by the PHASE-5.md spike, passing --base here is what
-    // lets the dev server's own emitted asset/HMR paths line up with the
-    // proxy's /preview/:projectId/* mount, with zero rewriting on the proxy
-    // side. Next.js has no equivalent flag (Phase 6) — it's spawned at root,
-    // and the proxy special-cases its fixed /_next/* asset path instead
-    // (server.ts) plus strips the /preview/:projectId prefix for everything
-    // else, via `preRewrite`.
-    const flags =
-      dev.framework === 'next'
-        ? ['-p', String(this.#port), '-H', '0.0.0.0']
-        : ['--base', `/preview/${projectId}/`, '--port', String(this.#port), '--host']
-    const args = [...dev.args, '--', ...flags]
+    // Spawn the framework's own binary directly out of node_modules/.bin,
+    // rather than through `dev.cmd`/`dev.args` (npm/pnpm/yarn/bun's `run
+    // <script>` wrapper — still what detectInstall/labeling uses elsewhere).
+    // The wrapper used to get a literal `--` inserted before these flags so
+    // the package manager would forward them to the underlying script — but
+    // npm and yarn strip that `--` before forwarding while pnpm forwards it
+    // *verbatim*, which next/vite then parse as "stop parsing flags," turning
+    // `-p`/`--port` into a positional arg instead of the port. That broke
+    // every pnpm-based preview (e.g. Next's `-p` was read as the project
+    // directory). Going straight to the binary sidesteps the disagreement
+    // entirely, for every package manager and framework alike.
+    const bin = resolveDevBin(dev.cwd, path, BIN_NAME[dev.framework])
+    const { args, env: frameworkEnv } = devArgsFor(dev.framework, projectId, this.#port)
 
-    // detached: true puts the child in its own process group. Necessary
-    // because `dev.cmd` is npm/pnpm/yarn/bun, which runs the actual dev
-    // server as a *grandchild* (via an intermediate shell) — a plain
-    // SIGTERM to the direct child alone routinely leaves that grandchild
-    // running and the port still bound. Killing the whole group (see stop())
-    // is what actually reaches it.
+    // detached: true puts the child in its own process group. Next and Vite
+    // don't need this to reach their own process (they're now the direct
+    // child, not a grandchild behind a package-manager shell), but they can
+    // still fork their own worker/render processes, and killing the whole
+    // group (see stop()) reaches those too.
     //
     // NODE_ENV: 'development' overrides the server's own NODE_ENV=production
     // (Dockerfile) — a dev server has no business inheriting that, and some
     // tooling (e.g. Next.js) actively warns or changes behavior when it sees
     // a "non-standard" NODE_ENV at runtime.
-    const child = this.#spawnFn(dev.cmd, args, {
+    const child = this.#spawnFn(bin, args, {
       cwd: dev.cwd,
       detached: true,
-      env: { ...process.env, NODE_ENV: 'development' },
+      env: { ...process.env, NODE_ENV: 'development', ...frameworkEnv },
     })
     this.#child = child
     child.stdout?.on('data', (d: Buffer) => this.#tracker.line(projectId, d.toString()))
@@ -276,4 +278,49 @@ function portOpen(port: number): Promise<boolean> {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms))
+}
+
+/** The `node_modules/.bin` shim to spawn directly for each supported framework. */
+const BIN_NAME: Record<DevCommand['framework'], string> = { next: 'next', vite: 'vite', cra: 'react-scripts' }
+
+/**
+ * Prefers `cwd`'s own `node_modules/.bin` (where the framework is actually
+ * declared as a dependency — the common case, and the only case any of this
+ * project's own workspaces or the test fixtures exercise), falling back to
+ * the project root's — some monorepo package-manager configurations hoist
+ * binaries only to the workspace root rather than symlinking them into every
+ * subpackage too. If neither exists, returns the `cwd` path anyway so a
+ * missing/incomplete install still fails the same way it always has: spawn's
+ * own ENOENT, caught by the `child.on('error', ...)` handler in `start()`.
+ */
+function resolveDevBin(cwd: string, projectRoot: string, binName: string): string {
+  const local = join(cwd, 'node_modules', '.bin', binName)
+  if (existsSync(local)) return local
+  const hoisted = join(projectRoot, 'node_modules', '.bin', binName)
+  return existsSync(hoisted) ? hoisted : local
+}
+
+/**
+ * Per-framework CLI args, and (CRA only) env overrides — `react-scripts`
+ * takes no port/host CLI flags at all, only `PORT`/`HOST` env vars. Vite
+ * gets `--base` so its own emitted asset/HMR paths line up with the proxy's
+ * `/preview/:projectId/*` mount (confirmed by the PHASE-5.md spike). Next
+ * and CRA have no equivalent flag — both are spawned at root instead, and
+ * the proxy special-cases their fixed absolute asset paths (server.ts).
+ */
+function devArgsFor(
+  framework: DevCommand['framework'],
+  projectId: string,
+  port: number,
+): { args: string[]; env: NodeJS.ProcessEnv } {
+  switch (framework) {
+    case 'next':
+      return { args: ['dev', '-p', String(port), '-H', '0.0.0.0'], env: {} }
+    case 'vite':
+      return { args: ['--base', `/preview/${projectId}/`, '--port', String(port), '--host'], env: {} }
+    case 'cra':
+      // BROWSER=none suppresses react-scripts' default "open a browser tab"
+      // behavior, which has no meaning in a headless container.
+      return { args: ['start'], env: { PORT: String(port), HOST: '0.0.0.0', BROWSER: 'none' } }
+  }
 }

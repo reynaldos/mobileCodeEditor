@@ -74,14 +74,16 @@ export async function buildServer(config: Config, services: Services): Promise<F
   // `preHandler` is the guard — only the project actually holding the single
   // preview slot may be proxied to; never trust a client-supplied port/host.
   //
-  // Next.js (Phase 6) has no `--base`-equivalent flag, so it's spawned at
-  // root instead (preview-manager.ts) and expects requests at `/`, not
-  // `/preview/:projectId/`. `preRewrite` strips the prefix for it before the
-  // normal param-substitution rewrite runs — for Vite it's a no-op passthrough
-  // (see @fastify/http-proxy's `fromParameters`: a `preRewrite` result that no
-  // longer starts with the matched prefix skips the transparent rewrite).
-  // Next's own `/_next/*` assets are absolute paths outside this prefix
-  // entirely — the second registration below catches those.
+  // Next.js and Create React App (Phase 6) have no `--base`-equivalent flag,
+  // so both are spawned at root instead (preview-manager.ts) and expect
+  // requests at `/`, not `/preview/:projectId/`. `preRewrite` strips the
+  // prefix for them before the normal param-substitution rewrite runs — for
+  // Vite it's a no-op passthrough (see @fastify/http-proxy's
+  // `fromParameters`: a `preRewrite` result that no longer starts with the
+  // matched prefix skips the transparent rewrite). Next's `/_next/*` assets
+  // and CRA's `/static/*` + `/ws` are absolute paths outside this prefix
+  // entirely — the registrations below catch those.
+  const ROOT_SPAWNED_FRAMEWORKS = new Set(['next', 'cra'])
   await app.register(httpProxy, {
     upstream: `http://127.0.0.1:${config.previewPort}`,
     prefix: '/preview/:projectId',
@@ -95,7 +97,8 @@ export async function buildServer(config: Config, services: Services): Promise<F
       }
       done()
     },
-    preRewrite: (url) => (previewTracker.activeFramework() === 'next' ? url.replace(/^\/preview\/[^/]+/, '') || '/' : url),
+    preRewrite: (url) =>
+      ROOT_SPAWNED_FRAMEWORKS.has(previewTracker.activeFramework() ?? '') ? url.replace(/^\/preview\/[^/]+/, '') || '/' : url,
   })
 
   // Next.js always emits its own JS/CSS/HMR assets at this fixed, root-
@@ -111,6 +114,39 @@ export async function buildServer(config: Config, services: Services): Promise<F
     preHandler: (_request, reply, done) => {
       if (previewTracker.activeFramework() !== 'next') {
         void reply.code(404).send({ error: 'no active Next.js preview' })
+        return
+      }
+      done()
+    },
+  })
+
+  // Create React App (react-scripts 5, confirmed against the version pinned
+  // by the one CRA project on this server) emits its JS/CSS bundle at this
+  // fixed, root-absolute path — same shape as Next's /_next above — and runs
+  // its HMR websocket at /ws (webpack-dev-server v4's default `webSocketURL`
+  // path; older CRA/webpack-dev-server-v3 projects using sockjs at
+  // /sockjs-node instead are not covered here).
+  await app.register(httpProxy, {
+    upstream: `http://127.0.0.1:${config.previewPort}`,
+    prefix: '/static',
+    rewritePrefix: '/static',
+    websocket: true,
+    preHandler: (_request, reply, done) => {
+      if (previewTracker.activeFramework() !== 'cra') {
+        void reply.code(404).send({ error: 'no active Create React App preview' })
+        return
+      }
+      done()
+    },
+  })
+  await app.register(httpProxy, {
+    upstream: `http://127.0.0.1:${config.previewPort}`,
+    prefix: '/ws',
+    rewritePrefix: '/ws',
+    websocket: true,
+    preHandler: (_request, reply, done) => {
+      if (previewTracker.activeFramework() !== 'cra') {
+        void reply.code(404).send({ error: 'no active Create React App preview' })
         return
       }
       done()

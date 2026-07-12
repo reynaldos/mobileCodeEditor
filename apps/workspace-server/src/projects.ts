@@ -276,8 +276,12 @@ export interface DevCommand {
    * (see PHASE-5.md's spike result). Next.js has no CLI equivalent — its
    * `basePath` is config-file-only — so it's spawned at root instead and the
    * proxy special-cases its fixed `/_next/*` asset path (Phase 6, server.ts).
+   * Create React App (`cra`) is the same shape as Next here: `react-scripts`
+   * takes no subpath flag either (only a `PORT`/`HOST` env pair), so it's
+   * spawned at root too and the proxy special-cases its fixed `/static/*` and
+   * `/ws` paths (server.ts).
    */
-  framework: 'vite' | 'next'
+  framework: 'vite' | 'next' | 'cra'
   /**
    * Absolute directory to run `cmd` from. Equals the project root, unless this
    * is a monorepo whose Vite/Next app lives in a subpackage (Phase 6) — e.g.
@@ -306,7 +310,7 @@ const MONOREPO_SEARCH_DIRS = ['apps', 'packages']
  */
 export function detectDevCommand(path: string): DevCommand | undefined {
   const atRoot = detectFrameworkAt(path)
-  if (atRoot) return { ...packageManagerFor(path, path), framework: atRoot }
+  if (atRoot) return { ...packageManagerFor(path, path, scriptFor(atRoot)), framework: atRoot }
 
   for (const group of MONOREPO_SEARCH_DIRS) {
     const groupDir = join(path, group)
@@ -320,48 +324,67 @@ export function detectDevCommand(path: string): DevCommand | undefined {
       const framework = detectFrameworkAt(dir)
       // The lockfile lives at the monorepo root, not in each subpackage, even
       // though `cmd` actually runs from `dir` — see packageManagerFor below.
-      if (framework) return { ...packageManagerFor(dir, path), framework }
+      if (framework) return { ...packageManagerFor(dir, path, scriptFor(framework)), framework }
     }
   }
   return undefined
 }
 
-/** Vite/Next detection at exactly `dir` — no recursion, no package-manager selection. */
-function detectFrameworkAt(dir: string): 'vite' | 'next' | undefined {
+/** Vite/Next/CRA detection at exactly `dir` — no recursion, no package-manager selection. */
+function detectFrameworkAt(dir: string): 'vite' | 'next' | 'cra' | undefined {
   const has = (f: string): boolean => existsSync(join(dir, f))
   const pkg = readPackageJson(dir)
-  if (!pkg?.scripts?.dev) return undefined
+  if (!pkg) return undefined
 
-  const isVite =
-    has('vite.config.ts') ||
-    has('vite.config.js') ||
-    has('vite.config.mjs') ||
-    has('vite.config.cjs') ||
-    Boolean(pkg.dependencies?.vite || pkg.devDependencies?.vite)
-  if (isVite) return 'vite'
+  if (pkg.scripts?.dev) {
+    const isVite =
+      has('vite.config.ts') ||
+      has('vite.config.js') ||
+      has('vite.config.mjs') ||
+      has('vite.config.cjs') ||
+      Boolean(pkg.dependencies?.vite || pkg.devDependencies?.vite)
+    if (isVite) return 'vite'
 
-  const isNext =
-    has('next.config.ts') ||
-    has('next.config.js') ||
-    has('next.config.mjs') ||
-    has('next.config.cjs') ||
-    Boolean(pkg.dependencies?.next || pkg.devDependencies?.next)
-  if (isNext) return 'next'
+    const isNext =
+      has('next.config.ts') ||
+      has('next.config.js') ||
+      has('next.config.mjs') ||
+      has('next.config.cjs') ||
+      Boolean(pkg.dependencies?.next || pkg.devDependencies?.next)
+    if (isNext) return 'next'
+  }
+
+  // Create React App has no dev-server flag or config file to key off of
+  // (react-scripts is a monolithic black box) and, unlike Vite/Next, its dev
+  // script is conventionally named "start", not "dev" — so it's checked
+  // independently of the `scripts.dev` gate above.
+  const isCra =
+    Boolean(pkg.scripts?.start) && Boolean(pkg.dependencies?.['react-scripts'] || pkg.devDependencies?.['react-scripts'])
+  if (isCra) return 'cra'
 
   return undefined
 }
 
+/** Which script name actually starts each framework's dev server — CRA alone uses "start" instead of "dev". */
+function scriptFor(framework: 'vite' | 'next' | 'cra'): string {
+  return framework === 'cra' ? 'start' : 'dev'
+}
+
 /**
- * Package manager + `run dev` args, keyed off `lockfileDir` (a workspace's
- * lockfile lives at the monorepo root, not in each subpackage) — `cwd` is
- * where the process actually spawns, which may be a subpackage dir.
+ * Package manager + `run <script>` args, keyed off `lockfileDir` (a
+ * workspace's lockfile lives at the monorepo root, not in each subpackage) —
+ * `cwd` is where the process actually spawns, which may be a subpackage dir.
  */
-function packageManagerFor(cwd: string, lockfileDir: string): { cmd: string; args: string[]; cwd: string } {
+function packageManagerFor(
+  cwd: string,
+  lockfileDir: string,
+  script: string,
+): { cmd: string; args: string[]; cwd: string } {
   const has = (f: string): boolean => existsSync(join(lockfileDir, f))
-  if (has('pnpm-lock.yaml')) return { cmd: 'pnpm', args: ['run', 'dev'], cwd }
-  if (has('yarn.lock')) return { cmd: 'yarn', args: ['dev'], cwd }
-  if (has('bun.lockb') || has('bun.lock')) return { cmd: 'bun', args: ['run', 'dev'], cwd }
-  return { cmd: 'npm', args: ['run', 'dev'], cwd }
+  if (has('pnpm-lock.yaml')) return { cmd: 'pnpm', args: ['run', script], cwd }
+  if (has('yarn.lock')) return { cmd: 'yarn', args: [script], cwd }
+  if (has('bun.lockb') || has('bun.lock')) return { cmd: 'bun', args: ['run', script], cwd }
+  return { cmd: 'npm', args: ['run', script], cwd }
 }
 
 interface PackageJson {

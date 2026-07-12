@@ -303,6 +303,31 @@ test('detectDevCommand prefers Vite over Next.js if a project somehow matches bo
   assert.equal(detectDevCommand(dir)?.framework, 'vite')
 })
 
+// --- detectDevCommand: Create React App (Phase 6) ---------------------------
+
+test('detectDevCommand recognizes a Create React App project via its "start" script and react-scripts dependency', () => {
+  const dir = fixtureDir()
+  writeFileSync(join(dir, 'pnpm-lock.yaml'), '')
+  writePackageJson(dir, { scripts: { start: 'react-scripts start' }, dependencies: { 'react-scripts': '^5.0.1' } })
+  assert.deepEqual(detectDevCommand(dir), { cmd: 'pnpm', args: ['run', 'start'], framework: 'cra', cwd: dir })
+})
+
+test('detectDevCommand does not mistake a "start" script alone for Create React App — react-scripts is required', () => {
+  const dir = fixtureDir()
+  writePackageJson(dir, { scripts: { start: 'node server.js' } })
+  assert.equal(detectDevCommand(dir), undefined)
+})
+
+test('detectDevCommand prefers Next.js/Vite over Create React App if a project somehow matches both', () => {
+  const dir = fixtureDir()
+  writeFileSync(join(dir, 'next.config.js'), 'module.exports = {}')
+  writePackageJson(dir, {
+    scripts: { dev: 'next dev', start: 'react-scripts start' },
+    dependencies: { next: '^15.0.0', 'react-scripts': '^5.0.1' },
+  })
+  assert.equal(detectDevCommand(dir)?.framework, 'next')
+})
+
 // --- detectDevCommand: monorepo subdirs (Phase 6) ---------------------------
 
 test('detectDevCommand finds a Vite app one level into apps/*, using the root lockfile', () => {

@@ -16,8 +16,8 @@ import { makeRedactor } from './redact.ts'
 
 /**
  * These spawn a REAL child process (like `projects.test.ts` spawns a real
- * `git`) — but never through npm/pnpm/yarn/bun, and never a real Vite. Two
- * separate concerns, deliberately kept apart:
+ * `git`) — but never a real Vite/Next/react-scripts binary. Two separate
+ * concerns, deliberately kept apart:
  *
  * - Whether the HMR-through-proxy trick actually works was answered by hand
  *   for PHASE-5.md's spike, against a real Vite dev server. Nothing here
@@ -32,16 +32,12 @@ import { makeRedactor } from './redact.ts'
  *   which is *why* `PreviewManager` kills the whole process group, not just
  *   `child`. `spawnFn` (mirrors `QueryFn` for the Claude SDK in session.ts)
  *   substitutes a direct, fast `node server.js`, so these tests are exercising
- *   the same detached-process-group spawn/kill path, just without npm's
- *   overhead riding along for no reason.
+ *   the same detached-process-group spawn/kill path, just without a real
+ *   framework binary's startup overhead riding along for no reason.
  */
 
-/** Ignores the npm-shaped `cmd`/`args`; runs the fixture's server.js directly with whatever PreviewManager forwarded after `--`. */
-const fakeSpawn: SpawnFn = (_cmd, args, opts) => {
-  const dashIndex = args.indexOf('--')
-  const forwarded = dashIndex >= 0 ? args.slice(dashIndex + 1) : []
-  return spawn('node', ['server.js', ...forwarded], opts)
-}
+/** Ignores whatever binary path PreviewManager resolved; runs the fixture's server.js directly with the exact args/env PreviewManager built for it. */
+const fakeSpawn: SpawnFn = (_cmd, args, opts) => spawn('node', ['server.js', ...args], opts)
 
 // Spread out across tests (so a slow-to-die child from a prior test in this
 // run can't collide) and randomized per process (so a leftover from a prior
@@ -109,6 +105,22 @@ function makeMonorepoPreviewableProject(root: string, name: string): string {
   return webDir
 }
 
+/** A project directory `detectDevCommand` recognizes as Create React App — port comes via the `PORT` env var, not a CLI flag, since react-scripts takes no such flag. */
+function makeCraPreviewableProject(root: string, name: string): void {
+  const dir = join(root, name)
+  mkdirSync(dir)
+  writeFileSync(
+    join(dir, 'package.json'),
+    JSON.stringify({ scripts: { start: 'node server.js' }, dependencies: { 'react-scripts': '5.0.1' } }),
+  )
+  writeFileSync(
+    join(dir, 'server.js'),
+    `const http = require('node:http')
+     const port = Number(process.env.PORT) || 0
+     http.createServer((_req, res) => res.end('ok')).listen(port)`,
+  )
+}
+
 /** A project directory with no dev command at all — the unsupported case. */
 function makeUnsupportedProject(root: string, name: string): void {
   const dir = join(root, name)
@@ -171,6 +183,51 @@ test('start spawns a Next.js dev command with -p/-H instead of Vite\'s --base/--
   assert.equal(tracker.activeFramework(), 'next')
 
   await manager.stop('demo-next', 'closed')
+})
+
+test('start spawns a Create React App dev command via PORT/HOST/BROWSER env vars instead of CLI flags, and tracks its framework', async () => {
+  const { root, log, projects, presence, port } = freshFixture()
+  makeCraPreviewableProject(root, 'demo-cra')
+  const tracker = new PreviewTracker()
+  let seenEnv: NodeJS.ProcessEnv | undefined
+  const spyingSpawn: SpawnFn = (cmd, args, opts) => {
+    seenEnv = opts.env
+    return fakeSpawn(cmd, args, opts)
+  }
+  const manager = new PreviewManager(log, tracker, projects, presence, config(port), { readyPollMs: 20, spawnFn: spyingSpawn })
+
+  await manager.start('demo-cra')
+  await waitFor(() => tracker.snapshot('demo-cra')?.phase === 'running', 'preview running')
+
+  assert.equal(tracker.activeProjectId(), 'demo-cra')
+  assert.equal(tracker.activeFramework(), 'cra')
+  assert.equal(seenEnv?.PORT, String(port))
+  assert.equal(seenEnv?.HOST, '0.0.0.0')
+  assert.equal(seenEnv?.BROWSER, 'none')
+
+  await manager.stop('demo-cra', 'closed')
+})
+
+test('start spawns the framework binary directly out of node_modules/.bin, not a package-manager wrapper (regression: pnpm forwards a literal "--" that next/vite misparse as a positional arg)', async () => {
+  const { root, log, projects, presence, port } = freshFixture()
+  makePreviewableProject(root, 'demo-bin')
+  writeFileSync(join(root, 'demo-bin', 'pnpm-lock.yaml'), '') // package manager choice must not affect what gets spawned
+  const binDir = join(root, 'demo-bin', 'node_modules', '.bin')
+  mkdirSync(binDir, { recursive: true })
+  const tracker = new PreviewTracker()
+  const cmds: string[] = []
+  const spyingSpawn: SpawnFn = (cmd, args, opts) => {
+    cmds.push(cmd)
+    return fakeSpawn(cmd, args, opts)
+  }
+  const manager = new PreviewManager(log, tracker, projects, presence, config(port), { readyPollMs: 20, spawnFn: spyingSpawn })
+
+  await manager.start('demo-bin')
+  await waitFor(() => tracker.snapshot('demo-bin')?.phase === 'running', 'preview running')
+
+  assert.deepEqual(cmds, [join(binDir, 'vite')])
+
+  await manager.stop('demo-bin', 'closed')
 })
 
 test('start finds and spawns a Vite app nested in a monorepo\'s apps/*, from that subdirectory', async () => {
