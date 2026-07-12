@@ -72,6 +72,43 @@ function makePreviewableProject(root: string, name: string): void {
   )
 }
 
+/** A project directory `detectDevCommand` recognizes as Next.js (Phase 6) — same fake HTTP listener, parses `-p` instead of `--base`/`--port`/`--host`. */
+function makeNextPreviewableProject(root: string, name: string): void {
+  const dir = join(root, name)
+  mkdirSync(dir)
+  writeFileSync(join(dir, 'next.config.js'), 'module.exports = {}')
+  writeFileSync(join(dir, 'package.json'), JSON.stringify({ scripts: { dev: 'node server.js' } }))
+  writeFileSync(
+    join(dir, 'server.js'),
+    `const http = require('node:http')
+     const argv = process.argv.slice(2)
+     let port = 0
+     for (let i = 0; i < argv.length; i++) if (argv[i] === '-p') port = Number(argv[i + 1])
+     http.createServer((_req, res) => res.end('ok')).listen(port)`,
+  )
+}
+
+/** A pnpm-monorepo root whose Vite app lives in `apps/web` — `detectDevCommand` should find it a level down. */
+function makeMonorepoPreviewableProject(root: string, name: string): string {
+  const projectDir = join(root, name)
+  mkdirSync(projectDir)
+  writeFileSync(join(projectDir, 'pnpm-lock.yaml'), '')
+  writeFileSync(join(projectDir, 'package.json'), JSON.stringify({ scripts: { dev: 'pnpm --filter web dev' } }))
+  const webDir = join(projectDir, 'apps', 'web')
+  mkdirSync(webDir, { recursive: true })
+  writeFileSync(join(webDir, 'vite.config.ts'), 'export default {}')
+  writeFileSync(join(webDir, 'package.json'), JSON.stringify({ scripts: { dev: 'node server.js' } }))
+  writeFileSync(
+    join(webDir, 'server.js'),
+    `const http = require('node:http')
+     const argv = process.argv.slice(2)
+     let port = 0
+     for (let i = 0; i < argv.length; i++) if (argv[i] === '--port') port = Number(argv[i + 1])
+     http.createServer((_req, res) => res.end('ok')).listen(port)`,
+  )
+  return webDir
+}
+
 /** A project directory with no dev command at all — the unsupported case. */
 function makeUnsupportedProject(root: string, name: string): void {
   const dir = join(root, name)
@@ -119,6 +156,43 @@ test('start spawns the detected dev command, polls the port, and reaches running
   assert.ok(log.replaySince(0).some((e) => e.type === 'preview_started' && e.projectId === 'demo'))
 
   await manager.stop('demo', 'closed')
+})
+
+test('start spawns a Next.js dev command with -p/-H instead of Vite\'s --base/--port/--host, and tracks its framework', async () => {
+  const { root, log, projects, presence, port } = freshFixture()
+  makeNextPreviewableProject(root, 'demo-next')
+  const tracker = new PreviewTracker()
+  const manager = new PreviewManager(log, tracker, projects, presence, config(port), { readyPollMs: 20, spawnFn: fakeSpawn })
+
+  await manager.start('demo-next')
+  await waitFor(() => tracker.snapshot('demo-next')?.phase === 'running', 'preview running')
+
+  assert.equal(tracker.activeProjectId(), 'demo-next')
+  assert.equal(tracker.activeFramework(), 'next')
+
+  await manager.stop('demo-next', 'closed')
+})
+
+test('start finds and spawns a Vite app nested in a monorepo\'s apps/*, from that subdirectory', async () => {
+  const { root, log, projects, presence, port } = freshFixture()
+  const webDir = makeMonorepoPreviewableProject(root, 'demo-mono')
+  const tracker = new PreviewTracker()
+  const cwds: string[] = []
+  const spyingSpawn: SpawnFn = (cmd, args, opts) => {
+    cwds.push(opts.cwd)
+    return fakeSpawn(cmd, args, opts)
+  }
+  const manager = new PreviewManager(log, tracker, projects, presence, config(port), {
+    readyPollMs: 20,
+    spawnFn: spyingSpawn,
+  })
+
+  await manager.start('demo-mono')
+  await waitFor(() => tracker.snapshot('demo-mono')?.phase === 'running', 'preview running')
+
+  assert.deepEqual(cwds, [webDir])
+
+  await manager.stop('demo-mono', 'closed')
 })
 
 test('starting a second project without force throws PreviewConflictError and leaves the first alone', async () => {

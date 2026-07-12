@@ -161,7 +161,7 @@ test('detectDevCommand picks the package manager from the lockfile, for a Vite p
   writeFileSync(join(dir, 'vite.config.ts'), 'export default {}')
   writeFileSync(join(dir, 'pnpm-lock.yaml'), '')
   writePackageJson(dir, { scripts: { dev: 'vite' } })
-  assert.deepEqual(detectDevCommand(dir), { cmd: 'pnpm', args: ['run', 'dev'], framework: 'vite' })
+  assert.deepEqual(detectDevCommand(dir), { cmd: 'pnpm', args: ['run', 'dev'], framework: 'vite', cwd: dir })
 })
 
 test('detectDevCommand recognizes yarn and bun lockfiles too', () => {
@@ -169,26 +169,26 @@ test('detectDevCommand recognizes yarn and bun lockfiles too', () => {
   writeFileSync(join(yarnDir, 'vite.config.js'), 'export default {}')
   writeFileSync(join(yarnDir, 'yarn.lock'), '')
   writePackageJson(yarnDir, { scripts: { dev: 'vite' } })
-  assert.deepEqual(detectDevCommand(yarnDir), { cmd: 'yarn', args: ['dev'], framework: 'vite' })
+  assert.deepEqual(detectDevCommand(yarnDir), { cmd: 'yarn', args: ['dev'], framework: 'vite', cwd: yarnDir })
 
   const bunDir = fixtureDir()
   writeFileSync(join(bunDir, 'vite.config.mjs'), 'export default {}')
   writeFileSync(join(bunDir, 'bun.lock'), '')
   writePackageJson(bunDir, { scripts: { dev: 'vite' } })
-  assert.deepEqual(detectDevCommand(bunDir), { cmd: 'bun', args: ['run', 'dev'], framework: 'vite' })
+  assert.deepEqual(detectDevCommand(bunDir), { cmd: 'bun', args: ['run', 'dev'], framework: 'vite', cwd: bunDir })
 })
 
 test('detectDevCommand falls back to npm with no lockfile at all', () => {
   const dir = fixtureDir()
   writeFileSync(join(dir, 'vite.config.ts'), 'export default {}')
   writePackageJson(dir, { scripts: { dev: 'vite' } })
-  assert.deepEqual(detectDevCommand(dir), { cmd: 'npm', args: ['run', 'dev'], framework: 'vite' })
+  assert.deepEqual(detectDevCommand(dir), { cmd: 'npm', args: ['run', 'dev'], framework: 'vite', cwd: dir })
 })
 
 test('detectDevCommand recognizes Vite via a devDependency, with no vite.config file present', () => {
   const dir = fixtureDir()
   writePackageJson(dir, { scripts: { dev: 'vite' }, devDependencies: { vite: '^6.0.0' } })
-  assert.deepEqual(detectDevCommand(dir), { cmd: 'npm', args: ['run', 'dev'], framework: 'vite' })
+  assert.deepEqual(detectDevCommand(dir), { cmd: 'npm', args: ['run', 'dev'], framework: 'vite', cwd: dir })
 })
 
 test('detectDevCommand is undefined with no "dev" script, even for a real Vite project', () => {
@@ -198,7 +198,7 @@ test('detectDevCommand is undefined with no "dev" script, even for a real Vite p
   assert.equal(detectDevCommand(dir), undefined)
 })
 
-test('detectDevCommand is undefined for a non-Vite project — v1 scope, per PHASE-5.md', () => {
+test('detectDevCommand is undefined for a webpack project — out of scope, per PHASE-5.md', () => {
   const dir = fixtureDir()
   writePackageJson(dir, { scripts: { dev: 'webpack serve' }, devDependencies: { webpack: '^5.0.0' } })
   assert.equal(detectDevCommand(dir), undefined)
@@ -207,4 +207,70 @@ test('detectDevCommand is undefined for a non-Vite project — v1 scope, per PHA
 test('detectDevCommand is undefined with no package.json at all', () => {
   const dir = fixtureDir()
   assert.equal(detectDevCommand(dir), undefined)
+})
+
+// --- detectDevCommand: Next.js (Phase 6) ------------------------------------
+
+test('detectDevCommand recognizes a Next.js project via next.config, no framework dependency needed', () => {
+  const dir = fixtureDir()
+  writeFileSync(join(dir, 'next.config.js'), 'module.exports = {}')
+  writeFileSync(join(dir, 'pnpm-lock.yaml'), '')
+  writePackageJson(dir, { scripts: { dev: 'next dev' } })
+  assert.deepEqual(detectDevCommand(dir), { cmd: 'pnpm', args: ['run', 'dev'], framework: 'next', cwd: dir })
+})
+
+test('detectDevCommand recognizes Next.js via a dependency, with no next.config file present', () => {
+  const dir = fixtureDir()
+  writePackageJson(dir, { scripts: { dev: 'next dev' }, dependencies: { next: '^15.0.0' } })
+  assert.deepEqual(detectDevCommand(dir), { cmd: 'npm', args: ['run', 'dev'], framework: 'next', cwd: dir })
+})
+
+test('detectDevCommand prefers Vite over Next.js if a project somehow matches both', () => {
+  const dir = fixtureDir()
+  writeFileSync(join(dir, 'vite.config.ts'), 'export default {}')
+  writePackageJson(dir, { scripts: { dev: 'vite' }, dependencies: { next: '^15.0.0' }, devDependencies: { vite: '^6.0.0' } })
+  assert.equal(detectDevCommand(dir)?.framework, 'vite')
+})
+
+// --- detectDevCommand: monorepo subdirs (Phase 6) ---------------------------
+
+test('detectDevCommand finds a Vite app one level into apps/*, using the root lockfile', () => {
+  const root = fixtureDir()
+  writeFileSync(join(root, 'pnpm-lock.yaml'), '')
+  writePackageJson(root, { scripts: { dev: 'pnpm --filter workspace-server dev' } })
+  const web = join(root, 'apps', 'web')
+  mkdirSync(web, { recursive: true })
+  writeFileSync(join(web, 'vite.config.ts'), 'export default {}')
+  writePackageJson(web, { scripts: { dev: 'vite' }, devDependencies: { vite: '^6.0.0' } })
+
+  assert.deepEqual(detectDevCommand(root), { cmd: 'pnpm', args: ['run', 'dev'], framework: 'vite', cwd: web })
+})
+
+test('detectDevCommand finds a Next.js app one level into packages/*, falling back to npm with no lockfile', () => {
+  const root = fixtureDir()
+  const site = join(root, 'packages', 'site')
+  mkdirSync(site, { recursive: true })
+  writeFileSync(join(site, 'next.config.js'), 'module.exports = {}')
+  writePackageJson(site, { scripts: { dev: 'next dev' } })
+
+  assert.deepEqual(detectDevCommand(root), { cmd: 'npm', args: ['run', 'dev'], framework: 'next', cwd: site })
+})
+
+test('detectDevCommand picks the alphabetically-first qualifying subdir when several match', () => {
+  const root = fixtureDir()
+  for (const name of ['zeta', 'alpha']) {
+    const dir = join(root, 'apps', name)
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(join(dir, 'vite.config.ts'), 'export default {}')
+    writePackageJson(dir, { scripts: { dev: 'vite' }, devDependencies: { vite: '^6.0.0' } })
+  }
+  assert.equal(detectDevCommand(root)?.cwd, join(root, 'apps', 'alpha'))
+})
+
+test('detectDevCommand returns undefined when neither the root nor any monorepo subdir qualifies', () => {
+  const root = fixtureDir()
+  writePackageJson(root, { scripts: { dev: 'pnpm --filter workspace-server dev' } })
+  mkdirSync(join(root, 'apps', 'server'), { recursive: true })
+  writePackageJson(join(root, 'apps', 'server'), { scripts: { dev: 'tsx watch src/index.ts' } })
+  assert.equal(detectDevCommand(root), undefined)
 })

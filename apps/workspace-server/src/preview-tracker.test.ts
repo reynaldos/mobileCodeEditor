@@ -4,14 +4,14 @@ import { PreviewTracker } from './preview-tracker.ts'
 
 test('a fresh preview starts in the starting phase', () => {
   const t = new PreviewTracker()
-  t.start('p1')
+  t.start('p1', 'vite')
   assert.deepEqual(t.snapshot('p1'), { projectId: 'p1', phase: 'starting', lines: [] })
   assert.equal(t.activeProjectId(), 'p1')
 })
 
 test('phase/line updates only apply to the currently active project', () => {
   const t = new PreviewTracker()
-  t.start('p1')
+  t.start('p1', 'vite')
   t.phase('p2', 'running') // no-op: p2 isn't the active one
   t.line('p2', 'should not appear')
   assert.deepEqual(t.snapshot('p1'), { projectId: 'p1', phase: 'starting', lines: [] })
@@ -20,14 +20,14 @@ test('phase/line updates only apply to the currently active project', () => {
 
 test('line splits on CR/LF, drops empty lines, and buffers oldest-first', () => {
   const t = new PreviewTracker()
-  t.start('p1')
+  t.start('p1', 'vite')
   t.line('p1', 'VITE v6 ready\n\n  Local: http://localhost:5173/\r\n')
   assert.deepEqual(t.snapshot('p1')?.lines, ['VITE v6 ready', '  Local: http://localhost:5173/'])
 })
 
 test('phase(error) records the message; activeProjectId drops once terminal', () => {
   const t = new PreviewTracker()
-  t.start('p1')
+  t.start('p1', 'vite')
   t.phase('p1', 'error', 'dev server did not start listening within 30000ms')
   assert.equal(t.activeProjectId(), undefined)
   assert.deepEqual(t.snapshot('p1'), {
@@ -40,7 +40,7 @@ test('phase(error) records the message; activeProjectId drops once terminal', ()
 
 test('stopped is terminal too — activeProjectId drops, snapshot survives for a late viewer', () => {
   const t = new PreviewTracker()
-  t.start('p1')
+  t.start('p1', 'vite')
   t.phase('p1', 'running')
   t.phase('p1', 'stopped')
   assert.equal(t.activeProjectId(), undefined)
@@ -49,9 +49,9 @@ test('stopped is terminal too — activeProjectId drops, snapshot survives for a
 
 test('starting a new preview replaces the previous one outright', () => {
   const t = new PreviewTracker()
-  t.start('p1')
+  t.start('p1', 'vite')
   t.line('p1', 'p1 booting')
-  t.start('p2')
+  t.start('p2', 'vite')
   assert.equal(t.activeProjectId(), 'p2')
   assert.equal(t.snapshot('p1'), undefined)
   assert.deepEqual(t.snapshot('p2'), { projectId: 'p2', phase: 'starting', lines: [] })
@@ -59,7 +59,7 @@ test('starting a new preview replaces the previous one outright', () => {
 
 test('subscribers receive line and phase messages in order, and only for the active project', () => {
   const t = new PreviewTracker()
-  t.start('p1')
+  t.start('p1', 'vite')
   const seen: unknown[] = []
   const unsubscribe = t.subscribe('p1', (m) => seen.push(m))
 
@@ -75,7 +75,7 @@ test('subscribers receive line and phase messages in order, and only for the act
 
 test('subscribe on a project that is not the active one is a harmless no-op', () => {
   const t = new PreviewTracker()
-  t.start('p1')
+  t.start('p1', 'vite')
   let called = false
   const unsubscribe = t.subscribe('someone-else', () => {
     called = true
@@ -87,7 +87,7 @@ test('subscribe on a project that is not the active one is a harmless no-op', ()
 
 test('a subscriber that throws does not break delivery to the others', () => {
   const t = new PreviewTracker()
-  t.start('p1')
+  t.start('p1', 'vite')
   const seen: unknown[] = []
   t.subscribe('p1', () => {
     throw new Error('dead SSE connection')

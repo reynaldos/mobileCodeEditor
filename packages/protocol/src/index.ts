@@ -203,7 +203,7 @@ export interface Project {
   branch?: string
   /** From the `project_created` event, if we have one. */
   createdAt?: number
-  /** Whether `detectDevCommand` found a runnable dev command (Phase 5, v1 == Vite only). Gates the preview button. */
+  /** Whether `detectDevCommand` found a runnable dev command (Phase 5/6: Vite or Next.js, at the root or one level into a monorepo). Gates the preview button. */
   previewSupported: boolean
 }
 

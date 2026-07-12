@@ -106,14 +106,21 @@ export class PreviewManager {
     const dev = detectDevCommand(path)
     if (!dev) throw new PreviewUnsupportedError("preview isn't supported for this project yet")
 
-    this.#tracker.start(projectId)
+    this.#tracker.start(projectId, dev.framework)
     this.#appendEvent(projectId, { type: 'preview_started' })
 
-    // Confirmed by the PHASE-5.md spike: passing --base here is what lets the
-    // dev server's own emitted asset/HMR paths line up with the proxy's
-    // /preview/:projectId/* mount, with zero rewriting on the proxy side.
-    const base = `/preview/${projectId}/`
-    const args = [...dev.args, '--', '--base', base, '--port', String(this.#port), '--host']
+    // Vite: confirmed by the PHASE-5.md spike, passing --base here is what
+    // lets the dev server's own emitted asset/HMR paths line up with the
+    // proxy's /preview/:projectId/* mount, with zero rewriting on the proxy
+    // side. Next.js has no equivalent flag (Phase 6) — it's spawned at root,
+    // and the proxy special-cases its fixed /_next/* asset path instead
+    // (server.ts) plus strips the /preview/:projectId prefix for everything
+    // else, via `preRewrite`.
+    const flags =
+      dev.framework === 'next'
+        ? ['-p', String(this.#port), '-H', '0.0.0.0']
+        : ['--base', `/preview/${projectId}/`, '--port', String(this.#port), '--host']
+    const args = [...dev.args, '--', ...flags]
 
     // detached: true puts the child in its own process group. Necessary
     // because `dev.cmd` is npm/pnpm/yarn/bun, which runs the actual dev
@@ -121,7 +128,7 @@ export class PreviewManager {
     // SIGTERM to the direct child alone routinely leaves that grandchild
     // running and the port still bound. Killing the whole group (see stop())
     // is what actually reaches it.
-    const child = this.#spawnFn(dev.cmd, args, { cwd: path, detached: true })
+    const child = this.#spawnFn(dev.cmd, args, { cwd: dev.cwd, detached: true })
     this.#child = child
     child.stdout?.on('data', (d: Buffer) => this.#tracker.line(projectId, d.toString()))
     child.stderr?.on('data', (d: Buffer) => this.#tracker.line(projectId, d.toString()))

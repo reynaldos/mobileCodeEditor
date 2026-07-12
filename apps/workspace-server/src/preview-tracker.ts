@@ -5,6 +5,7 @@ const MAX_LINES = 3000
 
 interface Preview {
   projectId: string
+  framework: 'vite' | 'next'
   phase: PreviewPhase
   lines: string[]
   error?: string
@@ -30,8 +31,8 @@ export class PreviewTracker {
   #active: Preview | undefined
 
   /** Begin tracking a new preview. Replaces (does not merge with) any previous one. */
-  start(projectId: string): void {
-    this.#active = { projectId, phase: 'starting', lines: [], subscribers: new Set() }
+  start(projectId: string, framework: 'vite' | 'next'): void {
+    this.#active = { projectId, framework, phase: 'starting', lines: [], subscribers: new Set() }
   }
 
   phase(projectId: string, phase: PreviewPhase, error?: string): void {
@@ -58,6 +59,11 @@ export class PreviewTracker {
   /** The project currently holding the slot, or `undefined` once it's reached a terminal phase. */
   activeProjectId(): string | undefined {
     return this.#active && !isTerminal(this.#active.phase) ? this.#active.projectId : undefined
+  }
+
+  /** The framework of the project currently holding the slot — server.ts's proxy needs this to route Next.js's `/_next/*` assets. */
+  activeFramework(): 'vite' | 'next' | undefined {
+    return this.#active && !isTerminal(this.#active.phase) ? this.#active.framework : undefined
   }
 
   snapshot(projectId: string): PreviewSnapshot | undefined {

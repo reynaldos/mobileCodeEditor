@@ -41,6 +41,33 @@ side is built. Branch: `phase-5/preview-tab`.
   `/proc`, not just the API's say-so) → the proxy correctly 404s afterward. 146 workspace-server
   tests + 28 web tests green (one new test in each, for `previewSupported` and for the
   `state.preview` reducer case), full monorepo typecheck and `apps/web` production build clean.
+- **Phase 6 (branch `phase-6/preview-nextjs-monorepo`): Next.js + monorepo support.** Design call
+  1's "out of scope for now" call on Next.js — no CLI flag for a subpath base, only a
+  `next.config.js`-only `basePath` — is superseded, without touching users' config files:
+  - `detectDevCommand` now also recognizes Next.js (`next.config.*` or a `next` dependency), and
+    — since only one preview ever runs system-wide (design call 2) — probes one level into
+    `apps/*`/`packages/*` when the project root itself has no dev command, covering pnpm/yarn/npm
+    monorepos (this repo's own `mobileCodeEditor` project included, whose Vite app lives in
+    `apps/web`). `DevCommand` gained `cwd` (where the subpackage actually is) alongside `framework`.
+  - `PreviewManager` spawns Next as `next dev -p <port> -H 0.0.0.0` — no `--base` equivalent
+    exists — while Vite keeps the original `--base`/`--port`/`--host` flags. `PreviewTracker`
+    now also tracks which framework is active (`activeFramework()`), since the proxy needs it.
+  - `server.ts`'s `/preview/:projectId/*` route stays byte-for-byte transparent for Vite, but
+    gained a `preRewrite` that strips the `/preview/<projectId>` prefix for Next (whose router
+    expects `/`, not a subpath) before `@fastify/http-proxy`'s normal param-substitution rewrite
+    runs. A second registration proxies Next's fixed, root-absolute `/_next/*` asset/HMR path —
+    gated only on "a Next preview is active" (no projectId in that path to check, and none
+    needed: single-slot again).
+  - Verified against a **real** `next@14` dev server (network was available this time — installed
+    for real, not the fake stand-in Phase 5's client verification needed): `previewSupported`
+    true for a real Next project → 202 start → real SSR'd HTML through the proxy with the prefix
+    correctly stripped → every `/_next/*` script tag the HTML actually emitted (`webpack.js`,
+    `main.js`, the dev build manifest) resolved 200 through the global passthrough → wrong
+    `projectId` 404s → stop → both proxy routes 404 again → child process confirmed gone via
+    `/proc`, not just the API's say-so. Also added the monorepo case to the existing Vite fixture
+    coverage. 155 workspace-server tests green (10 new: Next.js detection, monorepo subdir
+    detection across both frameworks, framework-specific spawn args, monorepo spawn cwd), full
+    monorepo typecheck and build clean.
 
 ---
 

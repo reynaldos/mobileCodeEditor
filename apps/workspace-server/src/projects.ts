@@ -227,23 +227,66 @@ function detectInstall(path: string): { cmd: string; args: string[] } | undefine
 export interface DevCommand {
   cmd: string
   args: string[]
-  /** v1 only ever detects Vite — see PHASE-5.md's spike result for why. */
-  framework: 'vite'
+  /**
+   * Vite accepts a subpath `--base` override at spawn time, which the preview
+   * reverse-proxy uses to run it transparently under `/preview/<projectId>/`
+   * (see PHASE-5.md's spike result). Next.js has no CLI equivalent — its
+   * `basePath` is config-file-only — so it's spawned at root instead and the
+   * proxy special-cases its fixed `/_next/*` asset path (Phase 6, server.ts).
+   */
+  framework: 'vite' | 'next'
+  /**
+   * Absolute directory to run `cmd` from. Equals the project root, unless this
+   * is a monorepo whose Vite/Next app lives in a subpackage (Phase 6) — e.g.
+   * `apps/web` — in which case detection walks down to find it.
+   */
+  cwd: string
 }
 
 /**
- * Which dev command a project's in-app preview (Phase 5) should run, or
+ * Subdirectories probed, one level deep, when the project root itself has no
+ * dev command — covers the common `apps/*`/`packages/*` monorepo layouts
+ * (pnpm/yarn/npm workspaces). First match wins, apps before packages,
+ * alphabetical within each.
+ */
+const MONOREPO_SEARCH_DIRS = ['apps', 'packages']
+
+/**
+ * Which dev command a project's in-app preview (Phase 5/6) should run, or
  * `undefined` if this project isn't previewable yet.
  *
- * v1 supports **Vite projects only**: it's the one confirmed (by spike, see
- * PHASE-5.md) to accept a subpath `--base` override at spawn time, which the
- * preview reverse-proxy requires. A project without a `dev` script, or without
- * Vite, gets no preview button rather than a silent failure on tap — same
- * honest, JS-ecosystem-shaped cut `detectInstall` already makes.
+ * Supports Vite and Next.js projects, at the project root or one level down a
+ * monorepo's `apps/*`/`packages/*`. A project without a `dev` script, or
+ * without either framework, gets no preview button rather than a silent
+ * failure on tap — same honest, JS-ecosystem-shaped cut `detectInstall`
+ * already makes.
  */
 export function detectDevCommand(path: string): DevCommand | undefined {
-  const has = (f: string): boolean => existsSync(join(path, f))
-  const pkg = readPackageJson(path)
+  const atRoot = detectFrameworkAt(path)
+  if (atRoot) return { ...packageManagerFor(path, path), framework: atRoot }
+
+  for (const group of MONOREPO_SEARCH_DIRS) {
+    const groupDir = join(path, group)
+    if (!existsSync(groupDir) || !statSync(groupDir).isDirectory()) continue
+    const children = readdirSync(groupDir, { withFileTypes: true })
+      .filter((e) => e.isDirectory() && !e.name.startsWith('.'))
+      .map((e) => e.name)
+      .sort()
+    for (const child of children) {
+      const dir = join(groupDir, child)
+      const framework = detectFrameworkAt(dir)
+      // The lockfile lives at the monorepo root, not in each subpackage, even
+      // though `cmd` actually runs from `dir` — see packageManagerFor below.
+      if (framework) return { ...packageManagerFor(dir, path), framework }
+    }
+  }
+  return undefined
+}
+
+/** Vite/Next detection at exactly `dir` — no recursion, no package-manager selection. */
+function detectFrameworkAt(dir: string): 'vite' | 'next' | undefined {
+  const has = (f: string): boolean => existsSync(join(dir, f))
+  const pkg = readPackageJson(dir)
   if (!pkg?.scripts?.dev) return undefined
 
   const isVite =
@@ -252,12 +295,30 @@ export function detectDevCommand(path: string): DevCommand | undefined {
     has('vite.config.mjs') ||
     has('vite.config.cjs') ||
     Boolean(pkg.dependencies?.vite || pkg.devDependencies?.vite)
-  if (!isVite) return undefined
+  if (isVite) return 'vite'
 
-  if (has('pnpm-lock.yaml')) return { cmd: 'pnpm', args: ['run', 'dev'], framework: 'vite' }
-  if (has('yarn.lock')) return { cmd: 'yarn', args: ['dev'], framework: 'vite' }
-  if (has('bun.lockb') || has('bun.lock')) return { cmd: 'bun', args: ['run', 'dev'], framework: 'vite' }
-  return { cmd: 'npm', args: ['run', 'dev'], framework: 'vite' }
+  const isNext =
+    has('next.config.ts') ||
+    has('next.config.js') ||
+    has('next.config.mjs') ||
+    has('next.config.cjs') ||
+    Boolean(pkg.dependencies?.next || pkg.devDependencies?.next)
+  if (isNext) return 'next'
+
+  return undefined
+}
+
+/**
+ * Package manager + `run dev` args, keyed off `lockfileDir` (a workspace's
+ * lockfile lives at the monorepo root, not in each subpackage) — `cwd` is
+ * where the process actually spawns, which may be a subpackage dir.
+ */
+function packageManagerFor(cwd: string, lockfileDir: string): { cmd: string; args: string[]; cwd: string } {
+  const has = (f: string): boolean => existsSync(join(lockfileDir, f))
+  if (has('pnpm-lock.yaml')) return { cmd: 'pnpm', args: ['run', 'dev'], cwd }
+  if (has('yarn.lock')) return { cmd: 'yarn', args: ['dev'], cwd }
+  if (has('bun.lockb') || has('bun.lock')) return { cmd: 'bun', args: ['run', 'dev'], cwd }
+  return { cmd: 'npm', args: ['run', 'dev'], cwd }
 }
 
 interface PackageJson {

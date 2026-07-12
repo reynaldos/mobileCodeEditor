@@ -68,11 +68,20 @@ export async function buildServer(config: Config, services: Services): Promise<F
   // Preview (Phase 5): the iframe's traffic (HTML/JS/HMR websocket), reverse-
   // proxied same-origin rather than a second Tailscale port mapping — see
   // PHASE-5.md design call 1. `rewritePrefix` mirrors `prefix` exactly so this
-  // is a transparent 1:1 forward: the dev server itself (spawned with
-  // `--base=/preview/:projectId/`) already emits every asset/HMR path
+  // is a transparent 1:1 forward for Vite: the dev server itself (spawned
+  // with `--base=/preview/:projectId/`) already emits every asset/HMR path
   // pre-prefixed, confirmed by the spike, so nothing here needs rewriting.
   // `preHandler` is the guard — only the project actually holding the single
   // preview slot may be proxied to; never trust a client-supplied port/host.
+  //
+  // Next.js (Phase 6) has no `--base`-equivalent flag, so it's spawned at
+  // root instead (preview-manager.ts) and expects requests at `/`, not
+  // `/preview/:projectId/`. `preRewrite` strips the prefix for it before the
+  // normal param-substitution rewrite runs — for Vite it's a no-op passthrough
+  // (see @fastify/http-proxy's `fromParameters`: a `preRewrite` result that no
+  // longer starts with the matched prefix skips the transparent rewrite).
+  // Next's own `/_next/*` assets are absolute paths outside this prefix
+  // entirely — the second registration below catches those.
   await app.register(httpProxy, {
     upstream: `http://127.0.0.1:${config.previewPort}`,
     prefix: '/preview/:projectId',
@@ -82,6 +91,26 @@ export async function buildServer(config: Config, services: Services): Promise<F
       const { projectId } = request.params as { projectId: string }
       if (previewTracker.activeProjectId() !== projectId) {
         void reply.code(404).send({ error: 'no active preview for this project' })
+        return
+      }
+      done()
+    },
+    preRewrite: (url) => (previewTracker.activeFramework() === 'next' ? url.replace(/^\/preview\/[^/]+/, '') || '/' : url),
+  })
+
+  // Next.js always emits its own JS/CSS/HMR assets at this fixed, root-
+  // absolute path, regardless of any prefix (Phase 6) — there's no per-project
+  // disambiguation to do here because only one preview ever runs system-wide
+  // (PHASE-5.md design call 2), so "a Next preview is active at all" is the
+  // whole guard.
+  await app.register(httpProxy, {
+    upstream: `http://127.0.0.1:${config.previewPort}`,
+    prefix: '/_next',
+    rewritePrefix: '/_next',
+    websocket: true,
+    preHandler: (_request, reply, done) => {
+      if (previewTracker.activeFramework() !== 'next') {
+        void reply.code(404).send({ error: 'no active Next.js preview' })
         return
       }
       done()
