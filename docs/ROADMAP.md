@@ -8,7 +8,7 @@ Bash. Build the things that don't exist unless you build them.
 
 ---
 
-## Where we are — 2026-07-11
+## Where we are — 2026-07-12
 
 **Shipped and running in production.** You direct Claude from your phone, approve diffs with
 your thumb, get pushed when it needs you, and it commits and pushes to GitHub as you — all
@@ -22,17 +22,25 @@ against a container running on Fly.io that never sleeps, with your laptop closed
 | Tailwind 4 migration | ✅ done |
 | Containerize the workspace | ✅ done |
 | Deploy to Fly (always-on, Tailscale in-container) | ✅ done, phone-verified |
-| CI/CD — auto-deploy on push to main | ✅ done (push to main → test → deploy) |
-| Phase 2 — projects (multi-repo, clone, picker) | ✅ built + verified locally; on-device test pending |
-| Phase 2.5 — threads (per-project history, resume/recap) | ✅ built + verified locally; on-device test pending |
+| CI/CD — auto-deploy on push to main | ✅ done, wired to the GitHub repo (PRs merge through it) |
+| Phase 2 — projects (multi-repo, clone, picker) | ✅ done, on-device verified |
+| Phase 2.5 — threads (per-project history, resume/recap) | ✅ done, on-device verified |
+| Phase 2.6 — visible project setup (stream, install, cancel, notify) | ✅ done, on-device verified |
+| Phase 2.7 — questions UI, allowlist, changes accordion, git identity, `.env` editor | ✅ done, on-device verified |
+| UX polish pass (PromptBox, images, PWA, markdown replies, tool-call grouping, header) | ✅ done, on-device verified, two known issues open (below) |
 | Phase 3 — files + editor · 4 — terminal · 5 — preview · 6 — convenience | ▫️ not started |
+
+**Known issues, deliberately deferred** (see [ON-DEVICE-CHECKLIST.md](ON-DEVICE-CHECKLIST.md)
+for repro notes) — neither blocks moving on:
+- `dvh` black strip still appears on cold launch in one real-device case; the earlier fix
+  (`c8c89f1`) didn't fully cover it.
+- PromptBox stutters at the 1→2 line transition while typing, then self-corrects.
 
 **Recommended next steps**, in order:
 
-1. **On-device test of Phase 2.** It's built and verified locally (90 tests, live routing);
-   the last step is the real thing — from your phone, clone a second repo, switch, prompt
-   each, confirm isolated conversations. Then `git push` and it auto-deploys.
-2. Then let real use pick between **preview** (Phase 5 — seeing the running app is a big deal
+1. ~~On-device test of Phase 2~~ — done, along with 2.5, 2.6, 2.7, and the UX polish pass. Full
+   checklist and results in [ON-DEVICE-CHECKLIST.md](ON-DEVICE-CHECKLIST.md).
+2. Let real use pick between **preview** (Phase 5 — seeing the running app is a big deal
    on a phone; note the Fly wrinkle below) and **files + editor** (Phase 3). Both are additive.
 
 Deferred deliberately, still correct: multi-tenant (a different product — [DECISIONS #13](DECISIONS.md)),
