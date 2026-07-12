@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { execFileSync } from 'node:child_process'
+import { execFileSync, spawn } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -8,7 +8,14 @@ import { setTimeout as sleep } from 'node:timers/promises'
 import { openDb } from './db.ts'
 import { EventLog } from './log.ts'
 import type { Github } from './github.ts'
-import { CreateError, detectDevCommand, ProjectStore, RemoveError, sanitizeProjectName } from './projects.ts'
+import {
+  CreateError,
+  detectDevCommand,
+  ProjectStore,
+  RemoveError,
+  sanitizeProjectName,
+  type SpawnFn,
+} from './projects.ts'
 import { makeRedactor } from './redact.ts'
 
 function fixtureDir(): string {
@@ -174,6 +181,40 @@ test('create-on-github creates the repo then clones it', async () => {
   await waitFor(() => log.projectCreations().some((e) => e.name === 'made-remote'), 'project_created')
   assert.deepEqual(created, { name: 'made-remote', vis: 'private' })
   assert.ok(existsSync(join(root, 'made-remote', '.git')), 'cloned the created repo')
+})
+
+test('project creation installs dependencies with NODE_ENV overridden to development, regardless of the parent process\'s NODE_ENV', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'mce-store-'))
+  const log = new EventLog(openDb(':memory:'), makeRedactor([]))
+
+  // A local repo (a plain `git clone` from a directory works the same as from
+  // a bare one) whose checked-in package.json + lockfile triggers the install
+  // step in #build, so `detectInstall` picks `npm install`.
+  const origin = mkdtempSync(join(tmpdir(), 'mce-origin-'))
+  execFileSync('git', ['-C', origin, 'init', '-q', '-b', 'main'])
+  writePackageJson(origin, { name: 'x' })
+  writeFileSync(join(origin, 'package-lock.json'), '{}')
+  execFileSync('git', ['-C', origin, 'add', '.'])
+  execFileSync('git', ['-C', origin, '-c', 'user.email=t@t.com', '-c', 'user.name=t', 'commit', '-q', '-m', 'init'])
+
+  let installEnv: NodeJS.ProcessEnv | undefined
+  const spyingSpawn: SpawnFn = (cmd, args, opts) => {
+    if (cmd === 'git') return spawn(cmd, args, opts) // let clone actually run
+    installEnv = opts.env // stand in for npm/pnpm/yarn/bun install — exit 0 immediately
+    return spawn('node', ['-e', ''], opts)
+  }
+
+  const store = new ProjectStore(root, log, undefined, undefined, spyingSpawn)
+  const { projectId } = store.create({ repoUrl: `file://${origin}`, name: 'installed-proj' })
+  assert.equal(projectId, 'installed-proj')
+
+  await waitFor(() => log.projectCreations().some((e) => e.name === 'installed-proj'), 'project_created')
+
+  // Whatever the workspace-server's own NODE_ENV is (production, in the real
+  // Dockerfile), the spawned install must see 'development' — see the comment
+  // at ProjectStore#spawn for why (npm/pnpm/yarn/bun silently skip
+  // devDependencies under NODE_ENV=production).
+  assert.equal(installEnv?.NODE_ENV, 'development')
 })
 
 async function waitFor(predicate: () => boolean, label: string, ms = 5000): Promise<void> {

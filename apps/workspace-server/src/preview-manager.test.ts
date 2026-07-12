@@ -195,6 +195,31 @@ test('start finds and spawns a Vite app nested in a monorepo\'s apps/*, from tha
   await manager.stop('demo-mono', 'closed')
 })
 
+test('start spawns the dev command with NODE_ENV overridden to development, regardless of the parent process\'s NODE_ENV', async () => {
+  const { root, log, projects, presence, port } = freshFixture()
+  makePreviewableProject(root, 'demo-env')
+  const tracker = new PreviewTracker()
+  let seenEnv: NodeJS.ProcessEnv | undefined
+  const spyingSpawn: SpawnFn = (cmd, args, opts) => {
+    seenEnv = opts.env
+    return fakeSpawn(cmd, args, opts)
+  }
+  const manager = new PreviewManager(log, tracker, projects, presence, config(port), {
+    readyPollMs: 20,
+    spawnFn: spyingSpawn,
+  })
+
+  await manager.start('demo-env')
+  await waitFor(() => tracker.snapshot('demo-env')?.phase === 'running', 'preview running')
+
+  // Whatever the workspace-server's own NODE_ENV is (production, in the real
+  // Dockerfile), the spawned dev server must see 'development' — see the
+  // comment at the spawn call in preview-manager.ts for why.
+  assert.equal(seenEnv?.NODE_ENV, 'development')
+
+  await manager.stop('demo-env', 'closed')
+})
+
 test('starting a second project without force throws PreviewConflictError and leaves the first alone', async () => {
   const { root, log, projects, presence, port } = freshFixture()
   makePreviewableProject(root, 'first')

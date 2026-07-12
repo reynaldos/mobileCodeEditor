@@ -27,7 +27,11 @@ export class PreviewConflictError extends Error {
 export class PreviewUnsupportedError extends Error {}
 
 /** Same shape as `node:child_process`'s `spawn` — injectable for tests, exactly like `QueryFn` for the SDK. */
-export type SpawnFn = (cmd: string, args: string[], opts: { cwd: string; detached: boolean }) => ChildProcess
+export type SpawnFn = (
+  cmd: string,
+  args: string[],
+  opts: { cwd: string; detached: boolean; env: NodeJS.ProcessEnv },
+) => ChildProcess
 
 /**
  * Orchestrates the one active preview dev server (Phase 5): spawns it behind
@@ -128,7 +132,16 @@ export class PreviewManager {
     // SIGTERM to the direct child alone routinely leaves that grandchild
     // running and the port still bound. Killing the whole group (see stop())
     // is what actually reaches it.
-    const child = this.#spawnFn(dev.cmd, args, { cwd: dev.cwd, detached: true })
+    //
+    // NODE_ENV: 'development' overrides the server's own NODE_ENV=production
+    // (Dockerfile) — a dev server has no business inheriting that, and some
+    // tooling (e.g. Next.js) actively warns or changes behavior when it sees
+    // a "non-standard" NODE_ENV at runtime.
+    const child = this.#spawnFn(dev.cmd, args, {
+      cwd: dev.cwd,
+      detached: true,
+      env: { ...process.env, NODE_ENV: 'development' },
+    })
     this.#child = child
     child.stdout?.on('data', (d: Buffer) => this.#tracker.line(projectId, d.toString()))
     child.stderr?.on('data', (d: Buffer) => this.#tracker.line(projectId, d.toString()))

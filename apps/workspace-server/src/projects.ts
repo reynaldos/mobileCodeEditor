@@ -1,10 +1,17 @@
 import type { Project, Visibility } from '@mce/protocol'
-import { execFileSync, spawn } from 'node:child_process'
+import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs'
 import { basename, join, resolve } from 'node:path'
 import type { BuildTracker } from './build-tracker.ts'
 import type { Github } from './github.ts'
 import type { EventLog } from './log.ts'
+
+/** Same shape as `node:child_process`'s `spawn` — injectable for tests, mirroring `PreviewManager`'s `SpawnFn`. */
+export type SpawnFn = (
+  cmd: string,
+  args: string[],
+  opts: { cwd?: string; signal?: AbortSignal; env: NodeJS.ProcessEnv },
+) => ChildProcess
 
 /**
  * The projects registry.
@@ -19,12 +26,14 @@ export class ProjectStore {
   readonly #log: EventLog
   readonly #github: Github | undefined
   readonly #builds: BuildTracker | undefined
+  readonly #spawnFn: SpawnFn
 
-  constructor(projectsRoot: string, log: EventLog, github?: Github, builds?: BuildTracker) {
+  constructor(projectsRoot: string, log: EventLog, github?: Github, builds?: BuildTracker, spawnFn?: SpawnFn) {
     this.#root = resolve(projectsRoot)
     this.#log = log
     this.#github = github
     this.#builds = builds
+    this.#spawnFn = spawnFn ?? spawn
     mkdirSync(this.#root, { recursive: true })
   }
 
@@ -156,10 +165,23 @@ export class ProjectStore {
    * Spawn a child, streaming its output into the build log line-by-line. The
    * AbortSignal (from BuildTracker) kills the process on cancel; we reject so
    * `#build` can clean up.
+   *
+   * `NODE_ENV: 'development'` overrides the server's own `NODE_ENV=production`
+   * (Dockerfile) so it never leaks into a project's `install`: npm/pnpm/yarn/bun
+   * all silently skip devDependencies under `NODE_ENV=production`, and most
+   * projects' own dev tooling (typescript, vite, eslint, tailwind, …) lives
+   * there — a project installed under the inherited env looks fine until its
+   * dev server (or even loading a TS config file) needs one of them and
+   * crashes. `git` (the other command this spawns) ignores NODE_ENV, so
+   * applying this unconditionally is harmless.
    */
   #spawn(cmd: string, args: string[], projectId: string, signal: AbortSignal | undefined, cwd?: string): Promise<void> {
     return new Promise<void>((resolvePromise, reject) => {
-      const child = spawn(cmd, args, { ...(cwd ? { cwd } : {}), ...(signal ? { signal } : {}) })
+      const child = this.#spawnFn(cmd, args, {
+        ...(cwd ? { cwd } : {}),
+        ...(signal ? { signal } : {}),
+        env: { ...process.env, NODE_ENV: 'development' },
+      })
       child.stdout?.on('data', (d: Buffer) => this.#builds?.line(projectId, d.toString()))
       child.stderr?.on('data', (d: Buffer) => this.#builds?.line(projectId, d.toString()))
       child.on('error', reject)
