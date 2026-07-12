@@ -96,7 +96,20 @@ export function useKeyboardInset(): void {
     const updateAppHeight = (): void => {
       document.documentElement.style.setProperty('--app-height', `${window.innerHeight}px`)
     }
-    updateAppHeight()
+
+    const viewport = window.visualViewport
+    const updateKeyboardInset = (): void => {
+      if (!viewport) return
+      const inset = Math.max(0, window.innerHeight - viewport.height - viewport.offsetTop)
+      document.documentElement.style.setProperty('--keyboard-inset', `${inset}px`)
+    }
+
+    const updateAll = (): void => {
+      updateAppHeight()
+      updateKeyboardInset()
+    }
+    updateAll()
+
     // A cold launch of an installed iOS PWA reads `window.innerHeight` before
     // WebKit finishes expanding the standalone window to its real full-screen
     // size — the first measurement lands short and leaves a dead strip at the
@@ -105,32 +118,46 @@ export function useKeyboardInset(): void {
     // makes it re-run. Rather than rely on the user doing that, re-measure a
     // few times right after mount to catch WebKit settling, and also listen
     // for the same signals a manual background/foreground would produce.
-    const settleTimers = [50, 150, 300, 600, 1000].map((delay) => window.setTimeout(updateAppHeight, delay))
-    const rafId = requestAnimationFrame(() => requestAnimationFrame(updateAppHeight))
-    document.addEventListener('visibilitychange', updateAppHeight)
-    window.addEventListener('pageshow', updateAppHeight)
-    window.addEventListener('resize', updateAppHeight)
-    window.addEventListener('orientationchange', updateAppHeight)
+    const settleTimers = [50, 150, 300, 600, 1000].map((delay) => window.setTimeout(updateAll, delay))
+    const rafId = requestAnimationFrame(() => requestAnimationFrame(updateAll))
+    document.addEventListener('visibilitychange', updateAll)
+    window.addEventListener('pageshow', updateAll)
+    window.addEventListener('resize', updateAll)
+    window.addEventListener('orientationchange', updateAll)
 
-    const viewport = window.visualViewport
-    const updateKeyboardInset = (): void => {
-      if (!viewport) return
-      const inset = Math.max(0, window.innerHeight - viewport.height - viewport.offsetTop)
-      document.documentElement.style.setProperty('--keyboard-inset', `${inset}px`)
-    }
     updateKeyboardInset()
     viewport?.addEventListener('resize', updateKeyboardInset)
     viewport?.addEventListener('scroll', updateKeyboardInset)
 
+    // The VisualViewport `resize` event is the only signal that's supposed to
+    // fire when the on-screen keyboard dismisses, but on an installed iOS PWA
+    // it sometimes just doesn't — leaving `--keyboard-inset` stuck at the
+    // keyboard's height forever, which reserves that much of `.app` as
+    // padding-bottom for a keyboard that's no longer there. Since nothing
+    // repaints it, that padding shows through as a dead black strip below the
+    // prompt bar, and unlike the cold-launch case, no resize/orientationchange
+    // ever comes along to fix it. `visualViewport.height` itself is always
+    // current when read (the event is only a notification, not a cache), so
+    // re-reading it a beat after every blur — independent of whether the
+    // resize event actually fires — closes the gap reliably.
+    let blurTimers: number[] = []
+    const onFocusOut = (): void => {
+      blurTimers.forEach(window.clearTimeout)
+      blurTimers = [50, 150, 300, 600].map((delay) => window.setTimeout(updateKeyboardInset, delay))
+    }
+    document.addEventListener('focusout', onFocusOut)
+
     return () => {
       settleTimers.forEach(window.clearTimeout)
+      blurTimers.forEach(window.clearTimeout)
       cancelAnimationFrame(rafId)
-      document.removeEventListener('visibilitychange', updateAppHeight)
-      window.removeEventListener('pageshow', updateAppHeight)
-      window.removeEventListener('resize', updateAppHeight)
-      window.removeEventListener('orientationchange', updateAppHeight)
+      document.removeEventListener('visibilitychange', updateAll)
+      window.removeEventListener('pageshow', updateAll)
+      window.removeEventListener('resize', updateAll)
+      window.removeEventListener('orientationchange', updateAll)
       viewport?.removeEventListener('resize', updateKeyboardInset)
       viewport?.removeEventListener('scroll', updateKeyboardInset)
+      document.removeEventListener('focusout', onFocusOut)
     }
   }, [])
 }

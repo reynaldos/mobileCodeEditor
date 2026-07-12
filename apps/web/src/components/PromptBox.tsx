@@ -1,5 +1,5 @@
 import { ArrowUp, Maximize2, Minimize2, Plus, X } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { sendPrompt, uploadImages } from '../api.ts'
 import { Drawer, DrawerContent, DrawerDescription, DrawerHeader, DrawerTitle } from './ui/drawer.tsx'
 
@@ -58,7 +58,16 @@ export function PromptBox({
   //
   // Skipped while expanded: the drawer's textarea fills its container via
   // flex-1 (CSS), and setting an inline px height here would fight that.
-  useEffect(() => {
+  //
+  // `useLayoutEffect`, not `useEffect`: this measures the DOM (scrollHeight)
+  // and then mutates it (inline height, which flips `isMultiline` and thus
+  // the grid layout around it) in response to that measurement. A plain
+  // `useEffect` runs after the browser has already painted the pre-resize
+  // frame, so every keystroke that crossed the wrap threshold painted one
+  // visible frame at the wrong height/layout before snapping to the right
+  // one — the "flighty"/glitchy jump while typing. Doing it synchronously
+  // before paint collapses that to a single frame.
+  useLayoutEffect(() => {
     const el = textareaRef.current
     if (!el || expanded) return
     el.style.height = 'auto'
