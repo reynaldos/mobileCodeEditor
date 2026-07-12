@@ -9,25 +9,11 @@ import { NotificationsButton } from './components/NotificationsButton.tsx'
 import { ProjectPicker } from './components/ProjectPicker.tsx'
 import { PromptBox } from './components/PromptBox.tsx'
 import { ThreadList } from './components/ThreadList.tsx'
-import { type AgentState, viewOf } from './events.ts'
+import { viewOf } from './events.ts'
 import { useBuilds } from './useBuilds.ts'
 import { useEventStream, useKeyboardInset } from './useEventStream.ts'
 import { useProjects } from './useProjects.ts'
 import { useThreads } from './useThreads.ts'
-
-const AGENT: Record<AgentState, { label: string; className: string }> = {
-  idle: { label: '', className: 'text-muted' },
-  thinking: { label: 'working…', className: 'text-accent' },
-  awaiting_approval: { label: 'needs you', className: 'text-warn' },
-  awaiting_input: { label: 'ready', className: 'text-muted' },
-  ended: { label: 'ended', className: 'text-muted' },
-}
-
-const CONNECTION: Record<string, string> = {
-  connecting: 'bg-muted',
-  live: 'bg-add',
-  reconnecting: 'bg-warn animate-pulse-dot',
-}
 
 /** Which overlay is up, if any. null = the conversation. */
 type Overlay = 'projects' | 'threads' | null
@@ -84,8 +70,8 @@ export function App(): React.JSX.Element {
     await refreshThreads()
   }
   const view = viewOf(state, activeThreadId)
-  const agent = AGENT[view.agent]
-  const projectName = projects.find((p) => p.id === activeProjectId)?.name
+  const activeProject = projects.find((p) => p.id === activeProjectId)
+  const projectName = activeProject?.name
   // While a project sets up, the build modal replaces the thread — leaving the
   // header usable so you can switch away and come back to it, still building.
   const showBuild = activeProjectId !== null && builds.shouldShow(activeProjectId)
@@ -94,14 +80,13 @@ export function App(): React.JSX.Element {
     // `app` owns 100dvh and the keyboard inset. See styles.css.
     <div className="app flex flex-col">
       <header className="flex shrink-0 items-center justify-between gap-3 border-b border-line bg-panel px-3.5 pb-2.5 pt-[calc(10px+env(safe-area-inset-top,0px))]">
-        <div className="flex min-w-0 items-center gap-2.5">
-          <span className={`size-2 shrink-0 rounded-full ${CONNECTION[connection]}`} title={connection} />
-          <button className="flex min-w-0 items-center gap-1.5" onClick={() => setOverlay('projects')} title="Switch project">
+        <button className="flex min-w-0 flex-col items-start" onClick={() => setOverlay('projects')} title="Switch project">
+          <span className="flex min-w-0 items-center gap-1.5">
             <span className="truncate font-semibold">{projectName ?? 'Projects'}</span>
             <ChevronDown className="size-4 shrink-0 text-muted" />
-            {agent.label && <span className={`shrink-0 text-xs ${agent.className}`}>{agent.label}</span>}
-          </button>
-        </div>
+          </span>
+          {activeProject?.branch && <span className="truncate text-xs text-muted">{activeProject.branch}</span>}
+        </button>
 
         <div className="flex shrink-0 items-center gap-2.5">
           {activeProjectId && (
