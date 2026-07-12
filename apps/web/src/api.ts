@@ -17,6 +17,7 @@ import type {
   PromptRequest,
   PromptResponse,
   RenameThreadRequest,
+  StartPreviewRequest,
   Thread,
   ThreadsResponse,
   UploadImagesResponse,
@@ -63,6 +64,13 @@ export function reportVisibility(clientId: string, visible: boolean): void {
 /** SSE of a project's live setup output (clone + install). */
 export const buildStreamUrl = (projectId: string): string =>
   `${BASE}/api/projects/${encodeURIComponent(projectId)}/build`
+
+/** SSE of the active preview's phase + dev-server output (Phase 5). */
+export const previewStreamUrl = (projectId: string): string =>
+  `${BASE}/api/projects/${encodeURIComponent(projectId)}/preview/stream`
+
+/** Same-origin, reverse-proxied URL for the preview iframe / "open in new tab". */
+export const previewUrl = (projectId: string): string => `${BASE}/preview/${encodeURIComponent(projectId)}/`
 
 export class ApiError extends Error {
   constructor(
@@ -164,6 +172,43 @@ export async function deleteThread(projectId: string, threadId: string): Promise
 /** Abort an in-progress build; the server SIGTERMs the child and cleans up. 202/409. */
 export async function cancelBuild(projectId: string): Promise<void> {
   await expectOk(await fetch(`${BASE}/api/projects/${encodeURIComponent(projectId)}/build/cancel`, { method: 'POST' }))
+}
+
+/** A different project's preview is active — the caller offers the confirm-and-evict dialog, then retries with `force: true`. */
+export class PreviewConflictError extends ApiError {
+  constructor(
+    message: string,
+    readonly activeProjectId: string,
+  ) {
+    super(409, message)
+  }
+}
+
+/**
+ * Start the (system-wide, single-slot) preview dev server for a project. Throws
+ * `PreviewConflictError` if a different project's preview is active and `force`
+ * wasn't set, or a plain `ApiError` (422) if the project has no detected dev
+ * command. 202 — the actual phase arrives over `previewStreamUrl`.
+ */
+export async function startPreview(projectId: string, force = false): Promise<void> {
+  const response = await fetch(`${BASE}/api/projects/${encodeURIComponent(projectId)}/preview/start`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ force } satisfies StartPreviewRequest),
+  })
+  if (response.ok) return
+
+  if (response.status === 409) {
+    const body = (await response.json().catch(() => ({}))) as { error?: string; activeProjectId?: string }
+    throw new PreviewConflictError(body.error ?? 'a different preview is active', body.activeProjectId ?? '')
+  }
+  const detail = await response.json().catch(() => ({}) as { error?: string })
+  throw new ApiError(response.status, detail.error ?? response.statusText)
+}
+
+/** Stop the active preview, if `projectId` is the one holding it. Idempotent otherwise. 202. */
+export async function stopPreview(projectId: string): Promise<void> {
+  await expectOk(await fetch(`${BASE}/api/projects/${encodeURIComponent(projectId)}/preview/stop`, { method: 'POST' }))
 }
 
 /** Before/after text for one changed file, for the post-turn diff accordion. */

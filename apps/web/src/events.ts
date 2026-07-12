@@ -84,6 +84,13 @@ export interface State {
   failed: Record<string, string>
   /** Project ids whose setup is in progress — drives the blocking build modal. */
   building: string[]
+  /**
+   * The project id with an active preview dev server, or null. Durable
+   * (`preview_started`/`preview_stopped`), so a reload or a second tab sees the
+   * peeked bar for whichever project is actually still running — not just the
+   * tab that tapped the button. At most one, by construction (PHASE-5.md).
+   */
+  preview: string | null
 }
 
 export const initialState: State = {
@@ -92,6 +99,7 @@ export const initialState: State = {
   created: [],
   failed: {},
   building: [],
+  preview: null,
 }
 
 /** The view for a thread, or an empty one if it has no events yet. */
@@ -120,6 +128,17 @@ export function reduce(state: State, event: Event): State {
       building: without(state.building, event.name),
       failed: { ...state.failed, [event.name]: event.error },
     }
+  }
+
+  // Preview lifecycle (Phase 5) — also not conversation. Single-slot: a
+  // `preview_stopped` only clears `preview` if it's for the project that's
+  // currently recorded (a belated stop for an already-superseded preview is a
+  // no-op, mirroring PreviewManager's own stale-handler guard server-side).
+  if (event.type === 'preview_started') {
+    return { ...base, preview: event.projectId }
+  }
+  if (event.type === 'preview_stopped') {
+    return { ...base, preview: state.preview === event.projectId ? null : state.preview }
   }
 
   // Every other event belongs to a thread. Legacy events (no threadId) collect

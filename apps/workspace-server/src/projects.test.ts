@@ -48,6 +48,17 @@ test('a plain (non-git) directory is still a project', () => {
   assert.equal(store.list()[0]?.branch, undefined)
 })
 
+test('list reports previewSupported from detectDevCommand, per project', () => {
+  const { store, root } = freshStore()
+  mkdirSync(join(root, 'vite-app'))
+  writePackageJson(join(root, 'vite-app'), { scripts: { dev: 'vite' }, devDependencies: { vite: '^6.0.0' } })
+  mkdirSync(join(root, 'plain'))
+
+  const byId = Object.fromEntries(store.list().map((p) => [p.id, p.previewSupported]))
+  assert.equal(byId['vite-app'], true)
+  assert.equal(byId['plain'], false)
+})
+
 test('pathOf refuses to escape the root', () => {
   const { store, root } = freshStore()
   assert.equal(store.pathOf('ok'), join(root, 'ok'))

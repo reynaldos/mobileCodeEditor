@@ -42,6 +42,7 @@ export class ProjectStore {
           ...(gitRemote(path) ? { repoUrl: gitRemote(path)! } : {}),
           ...(gitBranch(path) ? { branch: gitBranch(path)! } : {}),
           ...(createdAt[e.name] !== undefined ? { createdAt: createdAt[e.name] } : {}),
+          previewSupported: detectDevCommand(path) !== undefined,
         }
       })
       .sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0) || a.name.localeCompare(b.name))

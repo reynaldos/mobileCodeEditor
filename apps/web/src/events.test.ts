@@ -132,6 +132,26 @@ test('project_created / project_create_failed drive picker signals, not a conver
   assert.equal(state.failed['badproj'], 'clone failed')
 })
 
+test('preview_started / preview_stopped track the single active project, not a conversation', () => {
+  const ev = (n: number, projectId: string, body: EventBody): Event =>
+    ({ seq: n, sessionId: 's1', projectId, ts: 1, ...body }) as Event
+
+  let state = initialState
+  state = reduce(state, ev(1, 'a', { type: 'preview_started' }))
+  assert.equal(state.preview, 'a')
+
+  // A belated stop for a project that's no longer the active slot (PreviewManager
+  // evicted it already) is a no-op — mirrors the server's own stale-handler guard.
+  state = reduce(state, ev(2, 'b', { type: 'preview_started' }))
+  assert.equal(state.preview, 'b')
+  state = reduce(state, ev(3, 'a', { type: 'preview_stopped', reason: 'restarted' }))
+  assert.equal(state.preview, 'b')
+
+  state = reduce(state, ev(4, 'b', { type: 'preview_stopped', reason: 'closed' }))
+  assert.equal(state.preview, null)
+  assert.deepEqual(viewOf(state, 'th').items, []) // never routed into a thread view
+})
+
 test('session_ended is terminal and carries its reason', () => {
   const state = run([
     { type: 'session_started', claudeSessionId: 'c1', model: 'opus' },

@@ -1,17 +1,19 @@
 import { LEGACY_THREAD_ID } from '@mce/protocol'
-import { ChevronDown, History, KeyRound, MessageCirclePlus } from 'lucide-react'
+import { ChevronDown, History, KeyRound, MessageCirclePlus, MonitorPlay } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import { deleteThread, fetchHealth, type Health, renameThread } from './api.ts'
 import { BuildModal } from './components/BuildModal.tsx'
 import { EnvDrawer } from './components/EnvDrawer.tsx'
 import { MessageList } from './components/MessageList.tsx'
 import { NotificationsButton } from './components/NotificationsButton.tsx'
+import { PreviewDrawer } from './components/PreviewDrawer.tsx'
 import { ProjectPicker } from './components/ProjectPicker.tsx'
 import { PromptBox } from './components/PromptBox.tsx'
 import { ThreadList } from './components/ThreadList.tsx'
 import { viewOf } from './events.ts'
 import { useBuilds } from './useBuilds.ts'
 import { useEventStream, useKeyboardInset } from './useEventStream.ts'
+import { usePreview } from './usePreview.ts'
 import { useProjects } from './useProjects.ts'
 import { useThreads } from './useThreads.ts'
 
@@ -28,6 +30,7 @@ export function App(): React.JSX.Element {
   const [overlay, setOverlay] = useState<Overlay>(null)
   const [envOpen, setEnvOpen] = useState(false)
   const builds = useBuilds(state)
+  const preview = usePreview(state.preview)
   useKeyboardInset()
 
   const startNewThread = useCallback(() => setActiveThreadId(crypto.randomUUID()), [])
@@ -118,6 +121,16 @@ export function App(): React.JSX.Element {
               >
                 <KeyRound className="size-[18px]" />
               </button>
+              {activeProject?.previewSupported && (
+                <button
+                  className="flex items-center text-muted"
+                  title="Preview"
+                  aria-label="Preview"
+                  onClick={() => activeProjectId && preview.request(activeProjectId)}
+                >
+                  <MonitorPlay className="size-[18px]" />
+                </button>
+              )}
             </>
           )}
           <NotificationsButton />
@@ -183,6 +196,10 @@ export function App(): React.JSX.Element {
       )}
 
       {activeProjectId && <EnvDrawer projectId={activeProjectId} open={envOpen} onOpenChange={setEnvOpen} />}
+
+      {/* Mounted regardless of the active project — a peeked preview for a project you've since
+          navigated away from in the main nav stays alive and visible, per PHASE-5.md design call 7. */}
+      <PreviewDrawer preview={preview} projects={projects} />
 
       {overlay === 'threads' && activeProjectId && (
         <ThreadList

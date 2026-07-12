@@ -21,9 +21,26 @@ side is built. Branch: `phase-5/preview-tab`.
   clobber the reference to a just-started *replacement* preview during a forced eviction,
   leaking an unkillable orphaned process — fixed by only clearing `this.#child` if it's still
   the same object the handler belongs to (see the comment in `preview-manager.ts`).
-- **Not built yet: the client** — the nav button, the confirm-and-evict dialog, the
-  `PreviewDrawer` (snap points, iframe, starting/error states, "open in new tab"), and the
-  reducer wiring for `preview_started`/`preview_stopped`. That's the next chunk of work.
+- **Client built** (branch `phase-5/preview-client`): `Project.previewSupported` (server-computed
+  via `detectDevCommand`, gates the nav button) threaded through the protocol and
+  `ProjectStore.list()`; `api.ts` gained `startPreview`/`stopPreview`/`previewStreamUrl`/`previewUrl`
+  and a client-side `PreviewConflictError`; the reducer (`events.ts`) tracks `state.preview` —
+  the single active project id, durable across reloads — from `preview_started`/`preview_stopped`,
+  never routed into a thread view; `usePreview.ts` layers optimistic open/close and the
+  conflict-dialog flow on top of that durable state, the same shape as `useBuilds`;
+  `usePreviewStream.ts` mirrors `useBuildStream` for the drawer's live phase/output; `PreviewDrawer.tsx`
+  is a non-modal `vaul` drawer with two snap points (peek/full) — the iframe is never unmounted
+  between them, only hidden via CSS, so HMR and scroll state survive peeking — with a starting
+  spinner, an error state, a terminal-output toggle, "open in new tab", and the confirm-and-evict
+  dialog; the nav button lives in `App.tsx` next to the `.env` button, gated on
+  `activeProject.previewSupported`. Verified end-to-end against a real spawned child process (a
+  stand-in dev server, since installing real Vite over the network proved unreliable in this
+  sandbox — same npm flakiness noted above): start → `previewSupported` appears in
+  `GET /api/projects` → 202 → SSE snapshot matches the client's expected shape → the reverse proxy
+  serves the child's response → stop → the child process is actually gone (verified against
+  `/proc`, not just the API's say-so) → the proxy correctly 404s afterward. 146 workspace-server
+  tests + 28 web tests green (one new test in each, for `previewSupported` and for the
+  `state.preview` reducer case), full monorepo typecheck and `apps/web` production build clean.
 
 ---
 
