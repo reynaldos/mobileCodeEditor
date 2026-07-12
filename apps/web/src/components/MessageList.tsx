@@ -209,7 +209,7 @@ function Row({ item, projectId }: { item: Item; projectId?: string }): React.JSX
 
     case 'assistant':
       return (
-        <div className="rounded-[14px] rounded-bl-[4px] border border-line bg-panel px-3 py-2.5 [overflow-wrap:anywhere]">
+        <div className="px-0.5 py-1 [overflow-wrap:anywhere]">
           <Markdown text={item.text} />
         </div>
       )
