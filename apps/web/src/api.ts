@@ -16,6 +16,7 @@ import type {
   ProjectsResponse,
   PromptRequest,
   PromptResponse,
+  RemoveProjectRequest,
   RenameThreadRequest,
   StartPreviewRequest,
   Thread,
@@ -233,6 +234,38 @@ export async function fetchProjects(): Promise<Project[]> {
  */
 export async function createProject(body: CreateProjectRequest): Promise<CreateProjectResponse> {
   return (await post<CreateProjectResponse>('/api/projects', body))!
+}
+
+/** A live session/build/preview is still using the project — the caller offers a confirm dialog listing `blockers`, then retries with `force: true`. */
+export class RemoveProjectConflictError extends ApiError {
+  constructor(
+    message: string,
+    readonly blockers: string[],
+  ) {
+    super(409, message)
+  }
+}
+
+/**
+ * Remove ("offload") a project's local directory only — its git remote, if
+ * any, is never touched; re-cloning by `repoUrl` brings it back. Throws
+ * `RemoveProjectConflictError` if a live session/build/preview is still using
+ * it and `force` wasn't set. 204 on success.
+ */
+export async function removeProject(projectId: string, force = false): Promise<void> {
+  const response = await fetch(`${BASE}/api/projects/${encodeURIComponent(projectId)}`, {
+    method: 'DELETE',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ force } satisfies RemoveProjectRequest),
+  })
+  if (response.ok) return
+
+  if (response.status === 409) {
+    const body = (await response.json().catch(() => ({}))) as { error?: string; blockers?: string[] }
+    throw new RemoveProjectConflictError(body.error ?? "can't remove — something is still using this project", body.blockers ?? [])
+  }
+  const detail = await response.json().catch(() => ({}) as { error?: string })
+  throw new ApiError(response.status, detail.error ?? response.statusText)
 }
 
 /** Clone suggestions. Empty when GitHub isn't configured — the field still takes a URL. */

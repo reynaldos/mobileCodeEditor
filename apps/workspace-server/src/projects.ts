@@ -191,6 +191,24 @@ export class ProjectStore {
     }
   }
 
+  /**
+   * Remove a project's local directory ("offload", Phase 6). The filesystem is
+   * the source of truth for existence (see the class doc) — once this returns,
+   * `list()`/`exists()` no longer see the project. Never touches the git
+   * remote; re-cloning by `repoUrl` brings it back.
+   *
+   * Purely a filesystem op — it's the caller's job (the DELETE route) to stop
+   * anything still using the directory first: a live agent session, an
+   * in-flight build, or the active preview. Deleting out from under any of
+   * those is exactly the bug this ordering avoids.
+   */
+  remove(id: string): void {
+    const path = this.pathOf(id)
+    if (!path || !this.exists(id)) throw new RemoveError(`no such project: ${id}`)
+    rmSync(path, { recursive: true })
+    this.#emit({ type: 'project_removed' }, id)
+  }
+
   #createdAtByProject(): Record<string, number> {
     const out: Record<string, number> = {}
     for (const e of this.#log.projectCreations()) out[e.name] = e.ts
@@ -201,12 +219,15 @@ export class ProjectStore {
     body:
       | { type: 'project_create_started'; name: string; repoUrl?: string }
       | { type: 'project_created'; name: string; repoUrl?: string }
-      | { type: 'project_create_failed'; name: string; error: string },
+      | { type: 'project_create_failed'; name: string; error: string }
+      | { type: 'project_removed' },
     projectId: string,
   ): void {
     this.#log.append({ sessionId: 'system', projectId, ts: Date.now(), ...body })
   }
 }
+
+export class RemoveError extends Error {}
 
 export class CreateError extends Error {}
 

@@ -128,7 +128,7 @@ export async function buildServer(config: Config, services: Services): Promise<F
 
   registerEvents(app, log, config, presence)
   registerPresence(app, presence)
-  registerProjects(app, projects)
+  registerProjects(app, projects, sessions, builds, previews, previewTracker, log)
   registerBuild(app, builds, projects, config)
   registerPreview(app, previews, previewTracker, config)
   registerChanges(app, projects)

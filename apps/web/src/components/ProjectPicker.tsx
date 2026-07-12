@@ -1,8 +1,15 @@
 import type { GithubRepo, NameCheckResponse, Visibility } from '@mce/protocol'
 import type { Project } from '@mce/protocol'
-import { Check, Globe, Loader, Lock, Search, X } from 'lucide-react'
+import { Check, Globe, Loader, Lock, Search, Trash2, X } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ApiError, checkProjectName, createProject, fetchGithubRepos } from '../api.ts'
+import {
+  ApiError,
+  checkProjectName,
+  createProject,
+  fetchGithubRepos,
+  RemoveProjectConflictError,
+  removeProject,
+} from '../api.ts'
 import { useDebounced } from '../useDebounced.ts'
 import {
   Dialog,
@@ -30,15 +37,20 @@ interface Props {
   onSelect: (id: string) => void
   /** A clone/create was confirmed and kicked off — the caller shows the build modal. */
   onStarted: (projectId: string) => void
+  /** A project's local directory was removed — the caller refetches the list (and its own active-id bookkeeping). */
+  onRemoved: (projectId: string) => void
   onClose: () => void
 }
 
 /**
  * A full-screen overlay, not a router — Phase 2's IA is still "one screen plus a
  * picker". Tap a project to switch; the two actions dock to the bottom and each
- * opens its own drawer (Clone / Create).
+ * opens its own drawer (Clone / Create). A trailing trash icon offloads a
+ * project's local directory (Phase 6) — the git remote, if any, is untouched.
  */
-export function ProjectPicker({ projects, activeId, failed, onSelect, onStarted, onClose }: Props): React.JSX.Element {
+export function ProjectPicker({ projects, activeId, failed, onSelect, onStarted, onRemoved, onClose }: Props): React.JSX.Element {
+  const [removing, setRemoving] = useState<Project | undefined>()
+
   return (
     <div className="fixed inset-0 z-20 flex flex-col bg-bg/95 backdrop-blur-sm">
       <header className="flex items-center justify-between border-b border-line px-4 pb-3 pt-[calc(12px+env(safe-area-inset-top,0px))]">
@@ -51,9 +63,9 @@ export function ProjectPicker({ projects, activeId, failed, onSelect, onStarted,
       <div className="flex-1 overflow-y-auto p-4">
         <ul className="flex flex-col gap-2">
           {projects.map((p) => (
-            <li key={p.id}>
+            <li key={p.id} className="group flex items-center gap-1.5">
               <button
-                className={`w-full rounded-xl border p-3 text-left ${
+                className={`min-w-0 flex-1 rounded-xl border p-3 text-left ${
                   p.id === activeId ? 'border-accent bg-panel' : 'border-line bg-panel-2'
                 }`}
                 onClick={() => onSelect(p.id)}
@@ -64,6 +76,14 @@ export function ProjectPicker({ projects, activeId, failed, onSelect, onStarted,
                 </span>
                 {failed[p.name] && <div className="mt-1 text-[12px] text-del">{failed[p.name]}</div>}
               </button>
+              <button
+                className="flex size-9 shrink-0 items-center justify-center rounded-lg text-muted opacity-60 transition-opacity hover:bg-panel-2 group-hover:opacity-100"
+                title="Remove project"
+                aria-label={`Remove ${p.name}`}
+                onClick={() => setRemoving(p)}
+              >
+                <Trash2 className="size-4" />
+              </button>
             </li>
           ))}
           {projects.length === 0 && (
@@ -71,6 +91,15 @@ export function ProjectPicker({ projects, activeId, failed, onSelect, onStarted,
           )}
         </ul>
       </div>
+
+      <RemoveDialog
+        project={removing}
+        onOpenChange={(o) => !o && setRemoving(undefined)}
+        onRemoved={(id) => {
+          setRemoving(undefined)
+          onRemoved(id)
+        }}
+      />
 
       {/* Docked actions: each opens a drawer for its flow. */}
       <div className="flex shrink-0 gap-2 border-t border-line bg-panel/80 px-4 pt-3 pb-[calc(12px+env(safe-area-inset-bottom,0px))] backdrop-blur">
@@ -409,6 +438,96 @@ function CreateForm({ onStarted }: { onStarted: (id: string) => void }): React.J
         onStarted={onStarted}
       />
     </div>
+  )
+}
+
+/**
+ * Confirms removing a project's local directory — never the git remote (Phase
+ * 6 "offload"). If the server reports something still using it (409, a live
+ * session/build/preview), shows what and offers "Remove anyway" — same
+ * force-then-retry shape as the preview start-conflict dialog.
+ */
+function RemoveDialog({
+  project,
+  onOpenChange,
+  onRemoved,
+}: {
+  project: Project | undefined
+  onOpenChange: (open: boolean) => void
+  onRemoved: (projectId: string) => void
+}): React.JSX.Element {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | undefined>()
+  const [blockers, setBlockers] = useState<string[]>([])
+
+  // A fresh target project (or the dialog re-opening for a different row)
+  // drops any stale error/blocker state from a previous attempt.
+  useEffect(() => {
+    setBusy(false)
+    setError(undefined)
+    setBlockers([])
+  }, [project?.id])
+
+  async function go(force: boolean): Promise<void> {
+    if (!project) return
+    setBusy(true)
+    setError(undefined)
+    try {
+      await removeProject(project.id, force)
+      onRemoved(project.id)
+    } catch (err) {
+      if (err instanceof RemoveProjectConflictError) {
+        setBlockers(err.blockers)
+        setError(err.message)
+      } else {
+        setError(err instanceof ApiError ? err.message : String(err))
+      }
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Dialog
+      open={project !== undefined}
+      onOpenChange={(o) => {
+        if (busy) return
+        onOpenChange(o)
+      }}
+    >
+      <DialogContent showClose={!busy}>
+        <DialogHeader>
+          <DialogTitle>Remove this project?</DialogTitle>
+          <DialogDescription>
+            {project?.repoUrl
+              ? 'Deletes the local copy only — the git remote is untouched, so cloning it again brings it right back.'
+              : "Deletes the local copy. There's no git remote on this one, so this can't be undone."}
+          </DialogDescription>
+        </DialogHeader>
+
+        {project && (
+          <p className="truncate rounded-lg border border-line bg-panel-2 px-3 py-2 font-mono text-[13px] text-fg">{project.name}</p>
+        )}
+        {error && <p className="mt-2 text-[13px] text-del">{error}</p>}
+
+        <DialogFooter>
+          <DialogClose asChild>
+            <button
+              className="min-h-11 flex-1 rounded-xl border border-line bg-panel-2 text-[14px] font-medium text-fg disabled:opacity-50"
+              disabled={busy}
+            >
+              Cancel
+            </button>
+          </DialogClose>
+          <button
+            className="min-h-11 flex-1 rounded-[10px] border border-[#4a2326] bg-transparent text-[14px] font-semibold text-del disabled:opacity-50"
+            disabled={busy}
+            onClick={() => void go(blockers.length > 0)}
+          >
+            {busy ? 'Removing…' : blockers.length > 0 ? 'Remove anyway' : 'Remove'}
+          </button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }
 

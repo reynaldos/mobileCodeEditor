@@ -128,6 +128,13 @@ export type EventBody =
    * boot finding one left open by the last process (see recoverOnBoot).
    */
   | { type: 'preview_stopped'; reason: 'closed' | 'idle-timeout' | 'crashed' | 'restarted' }
+  /**
+   * A project's local directory was removed (Phase 6 "offload") — the
+   * filesystem is gone; this is just the audit trail. Never implies the git
+   * remote was touched — re-cloning by `repoUrl` brings it back. The
+   * `projectId` on the envelope is the removed project.
+   */
+  | { type: 'project_removed' }
 
 export type Event = EventEnvelope & EventBody
 export type EventType = EventBody['type']
@@ -267,6 +274,22 @@ export interface CreateProjectRequest {
 
 export interface CreateProjectResponse {
   projectId: string
+}
+
+/**
+ * DELETE /api/projects/:projectId — remove the project's local directory only.
+ * The git remote (if any) is never touched; re-cloning by `repoUrl` brings it
+ * back. `force: true` also stops a live session/build/preview for the project
+ * first, rather than 409ing on them — same shape as preview's `force` evict.
+ */
+export interface RemoveProjectRequest {
+  force?: boolean
+}
+
+/** 409 from a remove without force — something's still using the project. The client offers a confirm dialog listing `blockers`, then retries with `force: true`. */
+export interface RemoveProjectConflictResponse {
+  error: string
+  blockers: string[]
 }
 
 // --- Build progress (Phase 2.6): live setup output over its own SSE ----------

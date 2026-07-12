@@ -219,3 +219,44 @@ test('prompt() with an unknown image id rejects with UnknownImageError', async (
   await assert.rejects(() => manager.prompt('app', t, 'go', ['ghost.png']), UnknownImageError)
   await manager.shutdown()
 })
+
+// --- hasLiveSession / closeProject (Phase 6 — the remove-project guard) ----
+
+test('hasLiveSession is true only while a project actually has a live session', async () => {
+  const { manager } = harness(['app', 'other'], ['c1'])
+  assert.equal(manager.hasLiveSession('app'), false)
+
+  const t = manager.newThread('app')
+  await manager.prompt('app', t, 'hello')
+  assert.equal(manager.hasLiveSession('app'), true)
+  assert.equal(manager.hasLiveSession('other'), false, 'a different project is unaffected')
+
+  await manager.shutdown()
+  assert.equal(manager.hasLiveSession('app'), false, 'dead once stopped')
+})
+
+test('closeProject stops every thread of that project and leaves other projects alone', async () => {
+  const { manager } = harness(['app', 'other'], ['ca', 'cb', 'cc'])
+  const a1 = manager.newThread('app')
+  const a2 = manager.newThread('app')
+  const o1 = manager.newThread('other')
+
+  await manager.prompt('app', a1, 'one')
+  await manager.prompt('app', a2, 'two')
+  await manager.prompt('other', o1, 'three')
+  assert.equal(manager.hasLiveSession('app'), true)
+  assert.equal(manager.hasLiveSession('other'), true)
+
+  await manager.closeProject('app')
+
+  assert.equal(manager.hasLiveSession('app'), false)
+  assert.equal(manager.hasLiveSession('other'), true, "a different project's session survives")
+
+  await manager.shutdown()
+})
+
+test('closeProject on a project with no live session is a harmless no-op', async () => {
+  const { manager } = harness(['app'], ['c1'])
+  await manager.closeProject('app') // must not throw
+  assert.equal(manager.hasLiveSession('app'), false)
+})

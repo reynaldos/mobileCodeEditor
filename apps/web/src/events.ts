@@ -85,6 +85,12 @@ export interface State {
   /** Project ids whose setup is in progress — drives the blocking build modal. */
   building: string[]
   /**
+   * Project ids removed ("offloaded") elsewhere — another tab/device, or this
+   * one. Same "just says refetch" signal as `created`: the picker's list stays
+   * authoritative from GET /api/projects, this only triggers the refetch.
+   */
+  removed: string[]
+  /**
    * The project id with an active preview dev server, or null. Durable
    * (`preview_started`/`preview_stopped`), so a reload or a second tab sees the
    * peeked bar for whichever project is actually still running — not just the
@@ -99,6 +105,7 @@ export const initialState: State = {
   created: [],
   failed: {},
   building: [],
+  removed: [],
   preview: null,
 }
 
@@ -128,6 +135,9 @@ export function reduce(state: State, event: Event): State {
       building: without(state.building, event.name),
       failed: { ...state.failed, [event.name]: event.error },
     }
+  }
+  if (event.type === 'project_removed') {
+    return { ...base, removed: [...state.removed, event.projectId] }
   }
 
   // Preview lifecycle (Phase 5) — also not conversation. Single-slot: a

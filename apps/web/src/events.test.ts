@@ -132,6 +132,12 @@ test('project_created / project_create_failed drive picker signals, not a conver
   assert.equal(state.failed['badproj'], 'clone failed')
 })
 
+test('project_removed is also just a picker signal — the envelope projectId, not a conversation event', () => {
+  const state = run([{ type: 'project_removed' }])
+  assert.deepEqual(state.removed, ['p'])
+  assert.deepEqual(view(state).items, [], 'never lands in any thread view')
+})
+
 test('preview_started / preview_stopped track the single active project, not a conversation', () => {
   const ev = (n: number, projectId: string, body: EventBody): Event =>
     ({ seq: n, sessionId: 's1', projectId, ts: 1, ...body }) as Event

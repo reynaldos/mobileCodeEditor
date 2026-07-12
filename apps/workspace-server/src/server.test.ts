@@ -1,7 +1,7 @@
 import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk'
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { after, test } from 'node:test'
@@ -63,7 +63,15 @@ after(async () => {
 async function boot(
   config: Config = DEV,
   opts: { queryFn?: QueryFn } = {},
-): Promise<{ base: string; log: EventLog; presence: Presence; uploads: UploadStore }> {
+): Promise<{
+  base: string
+  log: EventLog
+  presence: Presence
+  uploads: UploadStore
+  builds: BuildTracker
+  previewTracker: PreviewTracker
+  sessions: SessionManager
+}> {
   const db = openDb(':memory:')
   const log = new EventLog(db, makeRedactor([]))
   const pushStore = new PushStore(db)
@@ -73,9 +81,10 @@ async function boot(
   const uploads = new UploadStore(config.uploadsRoot)
   const previewTracker = new PreviewTracker()
   const previews = new PreviewManager(log, previewTracker, projects, presence, config)
+  const sessions = new SessionManager(log, config, projects, uploads, opts.queryFn ? { queryFn: opts.queryFn } : {})
   const app = await buildServer(config, {
     log,
-    sessions: new SessionManager(log, config, projects, uploads, opts.queryFn ? { queryFn: opts.queryFn } : {}),
+    sessions,
     projects,
     builds,
     github: undefined,
@@ -93,7 +102,7 @@ async function boot(
   if (!address || typeof address === 'string') throw new Error('no port')
 
   teardown.push(() => app.close())
-  return { base: `http://127.0.0.1:${address.port}`, log, presence, uploads }
+  return { base: `http://127.0.0.1:${address.port}`, log, presence, uploads, builds, previewTracker, sessions }
 }
 
 const ORIGIN = 'http://localhost:5173'
@@ -332,6 +341,96 @@ test('GET /api/projects lists projects; POST creates one', async () => {
   })
   assert.equal(created.status, 202)
   assert.equal(((await created.json()) as { projectId: string }).projectId, 'fresh')
+})
+
+// --- DELETE /api/projects/:id (Phase 6 — remove/offload) --------------------
+
+test('DELETE /api/projects/:id removes the directory and appends project_removed', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'mce-proot-'))
+  mkdirSync(join(root, 'app'))
+  execFileSync('git', ['-C', join(root, 'app'), 'init', '-q'])
+  const { base, log } = await boot({ ...DEV, projectsRoot: root })
+
+  assert.ok(existsSync(join(root, 'app')))
+  const response = await fetch(`${base}/api/projects/app`, { method: 'DELETE' })
+  assert.equal(response.status, 204)
+  assert.equal(existsSync(join(root, 'app')), false)
+  assert.ok(log.replaySince(0).some((e) => e.type === 'project_removed' && e.projectId === 'app'))
+})
+
+test('DELETE /api/projects/:id for an unknown project is a 404', async () => {
+  const { base } = await boot()
+  const response = await fetch(`${base}/api/projects/ghost`, { method: 'DELETE' })
+  assert.equal(response.status, 404)
+})
+
+test('DELETE /api/projects/:id is a 409 while a build is in progress; force removes anyway', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'mce-proot-'))
+  mkdirSync(join(root, 'app'))
+  execFileSync('git', ['-C', join(root, 'app'), 'init', '-q'])
+  const { base, builds } = await boot({ ...DEV, projectsRoot: root })
+
+  builds.start('app')
+  const blocked = await fetch(`${base}/api/projects/app`, { method: 'DELETE' })
+  assert.equal(blocked.status, 409)
+  assert.deepEqual((await blocked.json()) as { blockers: string[] }, {
+    error: "Can't remove — a build is in progress.",
+    blockers: ['a build is in progress'],
+  })
+  assert.ok(existsSync(join(root, 'app')), 'not removed without force')
+
+  const forced = await fetch(`${base}/api/projects/app`, {
+    method: 'DELETE',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ force: true }),
+  })
+  assert.equal(forced.status, 204)
+  assert.equal(existsSync(join(root, 'app')), false)
+})
+
+test('DELETE /api/projects/:id is a 409 while the preview is running for it; force stops it and removes', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'mce-proot-'))
+  mkdirSync(join(root, 'app'))
+  execFileSync('git', ['-C', join(root, 'app'), 'init', '-q'])
+  const { base, previewTracker } = await boot({ ...DEV, projectsRoot: root })
+
+  previewTracker.start('app', 'vite')
+  const blocked = await fetch(`${base}/api/projects/app`, { method: 'DELETE' })
+  assert.equal(blocked.status, 409)
+  assert.deepEqual(((await blocked.json()) as { blockers: string[] }).blockers, ['the preview is running'])
+
+  const forced = await fetch(`${base}/api/projects/app`, {
+    method: 'DELETE',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ force: true }),
+  })
+  assert.equal(forced.status, 204)
+  assert.equal(existsSync(join(root, 'app')), false)
+  assert.equal(previewTracker.activeProjectId(), undefined, 'the preview was stopped too')
+})
+
+test('DELETE /api/projects/:id is a 409 while a conversation is live for it; force closes it and removes', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'mce-proot-'))
+  mkdirSync(join(root, 'app'))
+  execFileSync('git', ['-C', join(root, 'app'), 'init', '-q'])
+  const { base, sessions } = await boot({ ...DEV, projectsRoot: root, claudeToken: 'test-token' }, { queryFn: fakeQueryFn })
+
+  const threadId = sessions.newThread('app')
+  await sessions.prompt('app', threadId, 'hello')
+  assert.equal(sessions.hasLiveSession('app'), true)
+
+  const blocked = await fetch(`${base}/api/projects/app`, { method: 'DELETE' })
+  assert.equal(blocked.status, 409)
+  assert.deepEqual(((await blocked.json()) as { blockers: string[] }).blockers, ['a conversation is still active'])
+
+  const forced = await fetch(`${base}/api/projects/app`, {
+    method: 'DELETE',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ force: true }),
+  })
+  assert.equal(forced.status, 204)
+  assert.equal(existsSync(join(root, 'app')), false)
+  assert.equal(sessions.hasLiveSession('app'), false)
 })
 
 // ---------------------------------------------------------------------------

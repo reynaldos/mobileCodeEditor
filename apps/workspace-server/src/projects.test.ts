@@ -8,7 +8,7 @@ import { setTimeout as sleep } from 'node:timers/promises'
 import { openDb } from './db.ts'
 import { EventLog } from './log.ts'
 import type { Github } from './github.ts'
-import { CreateError, detectDevCommand, ProjectStore, sanitizeProjectName } from './projects.ts'
+import { CreateError, detectDevCommand, ProjectStore, RemoveError, sanitizeProjectName } from './projects.ts'
 import { makeRedactor } from './redact.ts'
 
 function fixtureDir(): string {
@@ -57,6 +57,36 @@ test('list reports previewSupported from detectDevCommand, per project', () => {
   const byId = Object.fromEntries(store.list().map((p) => [p.id, p.previewSupported]))
   assert.equal(byId['vite-app'], true)
   assert.equal(byId['plain'], false)
+})
+
+test('remove deletes the directory, drops it from list(), and appends project_removed', () => {
+  const { store, root, log } = freshStore()
+  mkdirSync(join(root, 'gone'))
+
+  store.remove('gone')
+
+  assert.equal(existsSync(join(root, 'gone')), false)
+  assert.equal(store.list().find((p) => p.id === 'gone'), undefined)
+  assert.ok(log.replaySince(0).some((e) => e.type === 'project_removed' && e.projectId === 'gone'))
+})
+
+test('remove on an unknown project throws RemoveError and touches nothing', () => {
+  const { store, root } = freshStore()
+  mkdirSync(join(root, 'stays'))
+
+  assert.throws(() => store.remove('ghost'), RemoveError)
+  assert.ok(existsSync(join(root, 'stays')))
+})
+
+test('remove never touches a sibling project', () => {
+  const { store, root } = freshStore()
+  mkdirSync(join(root, 'gone'))
+  mkdirSync(join(root, 'stays'))
+
+  store.remove('gone')
+
+  assert.equal(existsSync(join(root, 'gone')), false)
+  assert.ok(existsSync(join(root, 'stays')))
 })
 
 test('pathOf refuses to escape the root', () => {

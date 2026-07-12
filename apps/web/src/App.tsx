@@ -45,6 +45,13 @@ export function App(): React.JSX.Element {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.created.length])
 
+  // A project_removed event (this tab's own removal, or another tab/device's)
+  // → refetch. `refresh` already falls back off an active id that's gone.
+  useEffect(() => {
+    void projectsState.refresh()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.removed.length])
+
   // Selecting (or restoring) a project starts a fresh thread by default; you
   // reach previous threads through the history icon.
   useEffect(() => {
@@ -191,6 +198,7 @@ export function App(): React.JSX.Element {
             projectsState.setActiveId(projectId)
             setOverlay(null)
           }}
+          onRemoved={() => void projectsState.refresh()}
           onClose={() => setOverlay(null)}
         />
       )}
