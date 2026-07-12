@@ -33,7 +33,6 @@ export function PromptBox({
   const [sending, setSending] = useState(false)
   const [error, setError] = useState<string | undefined>()
   const [isMultiline, setIsMultiline] = useState(false)
-  const [isOverflowing, setIsOverflowing] = useState(false)
   const [expanded, setExpanded] = useState(false)
   const ready = Boolean(projectId && threadId && !disabledReason)
 
@@ -69,10 +68,6 @@ export function PromptBox({
     // past that means the box has actually grown, whether from an explicit
     // newline or the line simply wrapping.
     setIsMultiline(scrollHeight > 44)
-    // Only once content would actually be clipped by the max-height do we
-    // offer the full drawer — a couple of wrapped lines still fit fine in
-    // the compact bar, so there's no need to nudge the user toward it yet.
-    setIsOverflowing(scrollHeight > 160)
   }, [text, expanded])
 
   // Re-focus after switching modes — the compact and expanded views render
@@ -193,6 +188,7 @@ export function PromptBox({
 
   const addPhotoButton = (
     <button
+      key="add"
       type="button"
       aria-label="Add a photo"
       disabled={!ready}
@@ -205,6 +201,7 @@ export function PromptBox({
 
   const sendButton = (
     <button
+      key="send"
       aria-label="Send"
       className="grid size-9 shrink-0 place-items-center rounded-full bg-accent text-[#06101f] disabled:opacity-50"
       disabled={sending || (!text.trim() && images.length === 0) || !ready || uploading}
@@ -216,6 +213,7 @@ export function PromptBox({
 
   const expandButton = (
     <button
+      key="expand"
       type="button"
       aria-label="Expand"
       onClick={() => setExpanded(true)}
@@ -279,8 +277,13 @@ export function PromptBox({
               <>
                 {/* Text stays top-anchored and left-aligned with the `+` button
                  *  below it; the buttons get their own row so they never crowd
-                 *  the last line of text. */}
+                 *  the last line of text. `key="textarea"` matches the one below
+                 *  so React patches the existing node in place instead of
+                 *  unmounting/remounting it when this branch flips — otherwise
+                 *  the field (and the on-screen keyboard) loses focus the moment
+                 *  a line wraps past the first. */}
                 <textarea
+                  key="textarea"
                   {...textareaCommonProps}
                   rows={1}
                   className="prompt-input max-h-40 min-h-9 resize-none bg-transparent px-2 pt-1.5 pb-1 text-fg outline-none"
@@ -288,7 +291,7 @@ export function PromptBox({
                 <div className="flex shrink-0 items-center justify-between px-0.5 pb-0.5">
                   {addPhotoButton}
                   <div className="flex items-center gap-1">
-                    {isOverflowing && expandButton}
+                    {expandButton}
                     {sendButton}
                   </div>
                 </div>
@@ -297,6 +300,7 @@ export function PromptBox({
               <>
                 {addPhotoButton}
                 <textarea
+                  key="textarea"
                   {...textareaCommonProps}
                   rows={1}
                   className="prompt-input max-h-40 min-h-9 flex-1 resize-none bg-transparent px-1 py-1.5 text-fg outline-none"

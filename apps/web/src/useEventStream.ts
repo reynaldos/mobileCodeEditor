@@ -97,6 +97,18 @@ export function useKeyboardInset(): void {
       document.documentElement.style.setProperty('--app-height', `${window.innerHeight}px`)
     }
     updateAppHeight()
+    // A cold launch of an installed iOS PWA reads `window.innerHeight` before
+    // WebKit finishes expanding the standalone window to its real full-screen
+    // size — the first measurement lands short and leaves a dead strip at the
+    // bottom that never self-corrects, because nothing short of a genuine
+    // `resize` (rotating the device, or backgrounding/foregrounding the app)
+    // makes it re-run. Rather than rely on the user doing that, re-measure a
+    // few times right after mount to catch WebKit settling, and also listen
+    // for the same signals a manual background/foreground would produce.
+    const settleTimers = [50, 150, 300, 600, 1000].map((delay) => window.setTimeout(updateAppHeight, delay))
+    const rafId = requestAnimationFrame(() => requestAnimationFrame(updateAppHeight))
+    document.addEventListener('visibilitychange', updateAppHeight)
+    window.addEventListener('pageshow', updateAppHeight)
     window.addEventListener('resize', updateAppHeight)
     window.addEventListener('orientationchange', updateAppHeight)
 
@@ -111,6 +123,10 @@ export function useKeyboardInset(): void {
     viewport?.addEventListener('scroll', updateKeyboardInset)
 
     return () => {
+      settleTimers.forEach(window.clearTimeout)
+      cancelAnimationFrame(rafId)
+      document.removeEventListener('visibilitychange', updateAppHeight)
+      window.removeEventListener('pageshow', updateAppHeight)
       window.removeEventListener('resize', updateAppHeight)
       window.removeEventListener('orientationchange', updateAppHeight)
       viewport?.removeEventListener('resize', updateKeyboardInset)
