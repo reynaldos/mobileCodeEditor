@@ -112,6 +112,22 @@ export type EventBody =
   | { type: 'question_answered'; requestId: string; answers: Record<string, string> }
   /** The question was abandoned (turn aborted, or the server shut down). */
   | { type: 'question_cancelled'; requestId: string }
+  /**
+   * A project's dev server was started for the in-app preview (Phase 5). A
+   * small, durable marker — the live output streams elsewhere (see
+   * PreviewStreamMessage), same split as project_create_started/BuildStream.
+   * Only ever one active `preview_started` (with no terminal event) across the
+   * whole log at a time — a single fixed-port dev server, system-wide.
+   */
+  | { type: 'preview_started' }
+  /**
+   * The preview's dev server stopped. `closed` is the user closing the drawer
+   * (or evicting it to start another project's preview); `idle-timeout` is the
+   * automatic stop after every device stopped looking (see Presence);
+   * `crashed` is the child process dying on its own; `restarted` is a server
+   * boot finding one left open by the last process (see recoverOnBoot).
+   */
+  | { type: 'preview_stopped'; reason: 'closed' | 'idle-timeout' | 'crashed' | 'restarted' }
 
 export type Event = EventEnvelope & EventBody
 export type EventType = EventBody['type']
@@ -278,6 +294,44 @@ export type BuildStreamMessage =
   | { type: 'snapshot'; snapshot: BuildSnapshot }
   | { type: 'line'; line: string }
   | { type: 'phase'; phase: BuildPhase; error?: string; warning?: string }
+
+// --- Preview (Phase 5): a project's dev server, iframed in a drawer ---------
+
+/**
+ * Where the preview's dev server is. `starting` covers spawn-through-port-poll;
+ * `running` is serving (the client swaps its spinner for the iframe here);
+ * `error`/`stopped` are terminal. Rides its own non-durable stream (GET
+ * /api/projects/:id/preview/stream), same shape as BuildStreamMessage — the
+ * dev server's stdout/stderr is high-volume and must never bloat the log.
+ */
+export type PreviewPhase = 'starting' | 'running' | 'error' | 'stopped'
+
+/** The full state of the active (or just-stopped) preview. */
+export interface PreviewSnapshot {
+  projectId: string
+  phase: PreviewPhase
+  /** Dev-server output so far, oldest first (ring-buffered on the server). */
+  lines: string[]
+  /** Set when `phase === 'error'`. */
+  error?: string
+}
+
+/** Messages on GET /api/projects/:id/preview/stream. A `snapshot` arrives first. */
+export type PreviewStreamMessage =
+  | { type: 'snapshot'; snapshot: PreviewSnapshot }
+  | { type: 'line'; line: string }
+  | { type: 'phase'; phase: PreviewPhase; error?: string }
+
+/** POST /api/projects/:id/preview/start. `force` evicts a different project's active preview. */
+export interface StartPreviewRequest {
+  force?: boolean
+}
+
+/** 409 from start — another project's preview is active; the client offers the confirm dialog. */
+export interface PreviewConflictResponse {
+  error: string
+  activeProjectId: string
+}
 
 // --- Turn changes (Phase 2.7): what a turn touched -------------------------
 

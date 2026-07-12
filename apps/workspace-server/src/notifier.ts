@@ -94,6 +94,26 @@ export class Notifier {
         }
         return
 
+      // Preview (Phase 5). 'closed' is the user's own action, not news.
+      // 'restarted' is a boot-time recovery artifact, not something that
+      // happened just now. 'idle-timeout' and 'crashed' are the two cases
+      // where the server stopped and you weren't the one who asked it to.
+      case 'preview_stopped':
+        if (event.reason === 'idle-timeout') {
+          void this.#send({
+            title: 'Preview stopped',
+            body: 'Nobody was looking, so the dev server was shut down.',
+            tag: `preview-${event.projectId}`,
+          })
+        } else if (event.reason === 'crashed') {
+          void this.#send({
+            title: 'Preview crashed',
+            body: `${event.projectId}'s dev server stopped unexpectedly.`,
+            tag: `preview-${event.projectId}`,
+          })
+        }
+        return
+
       default:
         return
     }

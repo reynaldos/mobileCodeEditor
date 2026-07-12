@@ -6,6 +6,8 @@ import { Github } from './github.ts'
 import { EventLog } from './log.ts'
 import { Notifier } from './notifier.ts'
 import { Presence } from './presence.ts'
+import { PreviewManager } from './preview-manager.ts'
+import { PreviewTracker } from './preview-tracker.ts'
 import { ProjectStore } from './projects.ts'
 import { Pusher } from './push.ts'
 import { PushStore } from './push-store.ts'
@@ -33,11 +35,16 @@ const sessions = new SessionManager(log, config, projects, uploads)
 const pushStore = new PushStore(db)
 const pusher = new Pusher(pushStore, config.vapid)
 const presence = new Presence()
+const previewTracker = new PreviewTracker()
+const previews = new PreviewManager(log, previewTracker, projects, presence, config)
 
 // Live promises, generators, and builds died with the last process; the log did
 // not. Recover interrupted sessions and builds into terminal events.
 sessions.recoverOnBoot()
 projects.recoverOnBoot()
+// A dev server left running by the last process died with it (Phase 5) — same
+// "the log said it was still going, but nothing is" recovery as builds/sessions.
+previews.recoverOnBoot()
 // An upload whose prompt was never sent has zero long-term value and would
 // otherwise accumulate forever on a capacity-constrained volume. See UploadStore.
 uploads.sweepOrphans(log.referencedImageIds())
@@ -46,7 +53,19 @@ uploads.sweepOrphans(log.referencedImageIds())
 const notifier = new Notifier(log, pusher, presence)
 notifier.start()
 
-const app = await buildServer(config, { log, sessions, projects, builds, github, pushStore, pusher, presence, uploads })
+const app = await buildServer(config, {
+  log,
+  sessions,
+  projects,
+  builds,
+  github,
+  pushStore,
+  pusher,
+  presence,
+  uploads,
+  previews,
+  previewTracker,
+})
 
 await app.listen({ port: config.port, host: config.host })
 app.log.info(

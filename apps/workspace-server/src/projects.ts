@@ -1,6 +1,6 @@
 import type { Project, Visibility } from '@mce/protocol'
 import { execFileSync, spawn } from 'node:child_process'
-import { existsSync, mkdirSync, readdirSync, rmSync, statSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs'
 import { basename, join, resolve } from 'node:path'
 import type { BuildTracker } from './build-tracker.ts'
 import type { Github } from './github.ts'
@@ -221,6 +221,56 @@ function detectInstall(path: string): { cmd: string; args: string[] } | undefine
   if (has('package-lock.json')) return { cmd: 'npm', args: ['install'] }
   if (has('package.json')) return { cmd: 'npm', args: ['install'] }
   return undefined
+}
+
+export interface DevCommand {
+  cmd: string
+  args: string[]
+  /** v1 only ever detects Vite — see PHASE-5.md's spike result for why. */
+  framework: 'vite'
+}
+
+/**
+ * Which dev command a project's in-app preview (Phase 5) should run, or
+ * `undefined` if this project isn't previewable yet.
+ *
+ * v1 supports **Vite projects only**: it's the one confirmed (by spike, see
+ * PHASE-5.md) to accept a subpath `--base` override at spawn time, which the
+ * preview reverse-proxy requires. A project without a `dev` script, or without
+ * Vite, gets no preview button rather than a silent failure on tap — same
+ * honest, JS-ecosystem-shaped cut `detectInstall` already makes.
+ */
+export function detectDevCommand(path: string): DevCommand | undefined {
+  const has = (f: string): boolean => existsSync(join(path, f))
+  const pkg = readPackageJson(path)
+  if (!pkg?.scripts?.dev) return undefined
+
+  const isVite =
+    has('vite.config.ts') ||
+    has('vite.config.js') ||
+    has('vite.config.mjs') ||
+    has('vite.config.cjs') ||
+    Boolean(pkg.dependencies?.vite || pkg.devDependencies?.vite)
+  if (!isVite) return undefined
+
+  if (has('pnpm-lock.yaml')) return { cmd: 'pnpm', args: ['run', 'dev'], framework: 'vite' }
+  if (has('yarn.lock')) return { cmd: 'yarn', args: ['dev'], framework: 'vite' }
+  if (has('bun.lockb') || has('bun.lock')) return { cmd: 'bun', args: ['run', 'dev'], framework: 'vite' }
+  return { cmd: 'npm', args: ['run', 'dev'], framework: 'vite' }
+}
+
+interface PackageJson {
+  scripts?: Record<string, string>
+  dependencies?: Record<string, string>
+  devDependencies?: Record<string, string>
+}
+
+function readPackageJson(path: string): PackageJson | undefined {
+  try {
+    return JSON.parse(readFileSync(join(path, 'package.json'), 'utf8')) as PackageJson
+  } catch {
+    return undefined
+  }
 }
 
 /** Directory-safe project id: letters, digits, dot, dash, underscore. */

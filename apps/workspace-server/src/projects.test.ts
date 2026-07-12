@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
@@ -8,8 +8,16 @@ import { setTimeout as sleep } from 'node:timers/promises'
 import { openDb } from './db.ts'
 import { EventLog } from './log.ts'
 import type { Github } from './github.ts'
-import { CreateError, ProjectStore, sanitizeProjectName } from './projects.ts'
+import { CreateError, detectDevCommand, ProjectStore, sanitizeProjectName } from './projects.ts'
 import { makeRedactor } from './redact.ts'
+
+function fixtureDir(): string {
+  return mkdtempSync(join(tmpdir(), 'mce-devcmd-'))
+}
+
+function writePackageJson(dir: string, body: object): void {
+  writeFileSync(join(dir, 'package.json'), JSON.stringify(body))
+}
 
 function freshStore(): { store: ProjectStore; log: EventLog; root: string } {
   const root = mkdtempSync(join(tmpdir(), 'mce-store-'))
@@ -134,3 +142,58 @@ async function waitFor(predicate: () => boolean, label: string, ms = 5000): Prom
     await sleep(20)
   }
 }
+
+// --- detectDevCommand (Phase 5) ---------------------------------------------
+
+test('detectDevCommand picks the package manager from the lockfile, for a Vite project', () => {
+  const dir = fixtureDir()
+  writeFileSync(join(dir, 'vite.config.ts'), 'export default {}')
+  writeFileSync(join(dir, 'pnpm-lock.yaml'), '')
+  writePackageJson(dir, { scripts: { dev: 'vite' } })
+  assert.deepEqual(detectDevCommand(dir), { cmd: 'pnpm', args: ['run', 'dev'], framework: 'vite' })
+})
+
+test('detectDevCommand recognizes yarn and bun lockfiles too', () => {
+  const yarnDir = fixtureDir()
+  writeFileSync(join(yarnDir, 'vite.config.js'), 'export default {}')
+  writeFileSync(join(yarnDir, 'yarn.lock'), '')
+  writePackageJson(yarnDir, { scripts: { dev: 'vite' } })
+  assert.deepEqual(detectDevCommand(yarnDir), { cmd: 'yarn', args: ['dev'], framework: 'vite' })
+
+  const bunDir = fixtureDir()
+  writeFileSync(join(bunDir, 'vite.config.mjs'), 'export default {}')
+  writeFileSync(join(bunDir, 'bun.lock'), '')
+  writePackageJson(bunDir, { scripts: { dev: 'vite' } })
+  assert.deepEqual(detectDevCommand(bunDir), { cmd: 'bun', args: ['run', 'dev'], framework: 'vite' })
+})
+
+test('detectDevCommand falls back to npm with no lockfile at all', () => {
+  const dir = fixtureDir()
+  writeFileSync(join(dir, 'vite.config.ts'), 'export default {}')
+  writePackageJson(dir, { scripts: { dev: 'vite' } })
+  assert.deepEqual(detectDevCommand(dir), { cmd: 'npm', args: ['run', 'dev'], framework: 'vite' })
+})
+
+test('detectDevCommand recognizes Vite via a devDependency, with no vite.config file present', () => {
+  const dir = fixtureDir()
+  writePackageJson(dir, { scripts: { dev: 'vite' }, devDependencies: { vite: '^6.0.0' } })
+  assert.deepEqual(detectDevCommand(dir), { cmd: 'npm', args: ['run', 'dev'], framework: 'vite' })
+})
+
+test('detectDevCommand is undefined with no "dev" script, even for a real Vite project', () => {
+  const dir = fixtureDir()
+  writeFileSync(join(dir, 'vite.config.ts'), 'export default {}')
+  writePackageJson(dir, { scripts: { build: 'vite build' } })
+  assert.equal(detectDevCommand(dir), undefined)
+})
+
+test('detectDevCommand is undefined for a non-Vite project — v1 scope, per PHASE-5.md', () => {
+  const dir = fixtureDir()
+  writePackageJson(dir, { scripts: { dev: 'webpack serve' }, devDependencies: { webpack: '^5.0.0' } })
+  assert.equal(detectDevCommand(dir), undefined)
+})
+
+test('detectDevCommand is undefined with no package.json at all', () => {
+  const dir = fixtureDir()
+  assert.equal(detectDevCommand(dir), undefined)
+})

@@ -23,6 +23,14 @@ export interface Config {
   readonly claudeToken: string | undefined
   readonly model: string | undefined
   readonly isDev: boolean
+  /**
+   * Preview (Phase 5). One fixed local port for the single, system-wide dev
+   * server — see PHASE-5.md design call 2. Chosen to dodge common framework
+   * defaults (3000, 5173, 8080).
+   */
+  readonly previewPort: number
+  /** How long a preview can sit with nobody looking (Presence.anyVisible false) before it auto-stops. */
+  readonly previewIdleTimeoutMs: number
   /** The PWA build. Served from this same origin, which is why CORS exists only in dev. */
   readonly webDist: string
   /** Web push. Absent means push is disabled — the server boots fine without it. */
@@ -71,6 +79,8 @@ export function loadConfig(): Config {
     isDev: process.env.NODE_ENV !== 'production',
     webDist: resolve(process.env.WEB_DIST ?? new URL('../../web/dist', import.meta.url).pathname),
     vapid: loadVapid(),
+    previewPort: Number(process.env.PREVIEW_PORT ?? 4999),
+    previewIdleTimeoutMs: Number(process.env.PREVIEW_IDLE_TIMEOUT_MS ?? 30 * 60 * 1000),
   }
 }
 

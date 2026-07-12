@@ -10,6 +10,8 @@ import type { Config } from './config.ts'
 import { openDb } from './db.ts'
 import { EventLog } from './log.ts'
 import { Presence } from './presence.ts'
+import { PreviewManager } from './preview-manager.ts'
+import { PreviewTracker } from './preview-tracker.ts'
 import { ProjectStore } from './projects.ts'
 import { Pusher } from './push.ts'
 import { PushStore } from './push-store.ts'
@@ -49,6 +51,8 @@ const DEV: Config = {
   isDev: true,
   webDist: '/nonexistent-so-static-serving-is-skipped',
   vapid: undefined,
+  previewPort: 0,
+  previewIdleTimeoutMs: 30 * 60 * 1000,
 }
 
 const teardown: Array<() => Promise<void>> = []
@@ -67,6 +71,8 @@ async function boot(
   const projects = new ProjectStore(config.projectsRoot, log, undefined, builds)
   const presence = new Presence()
   const uploads = new UploadStore(config.uploadsRoot)
+  const previewTracker = new PreviewTracker()
+  const previews = new PreviewManager(log, previewTracker, projects, presence, config)
   const app = await buildServer(config, {
     log,
     sessions: new SessionManager(log, config, projects, uploads, opts.queryFn ? { queryFn: opts.queryFn } : {}),
@@ -77,6 +83,8 @@ async function boot(
     pusher: new Pusher(pushStore, config.vapid),
     presence,
     uploads,
+    previews,
+    previewTracker,
   })
   app.log.level = 'silent'
 

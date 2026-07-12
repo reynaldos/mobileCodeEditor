@@ -31,6 +31,8 @@ const CONFIG: Config = {
   isDev: true,
   webDist: '/nonexistent',
   vapid: undefined,
+  previewPort: 0,
+  previewIdleTimeoutMs: 30 * 60 * 1000,
 }
 
 // The SDK message union has ~38 variants; we construct the five we map.

@@ -336,6 +336,25 @@ export class EventLog {
       .map((r) => ({ tool: r.tool, ...(r.match ? { match: r.match } : {}) }))
   }
 
+  /**
+   * The project whose preview dev server is active right now, if any (Phase 5).
+   * Recovered from the log via the single-slot invariant — only ever one
+   * preview running system-wide (one fixed-port dev server) — so whichever
+   * project's `preview_started`/`preview_stopped` happened most recently,
+   * across every project, tells you what's true right now.
+   */
+  activePreview(): { projectId: string } | undefined {
+    const row = this.#db
+      .prepare(
+        `SELECT project_id AS projectId, type
+           FROM events
+          WHERE type IN ('preview_started', 'preview_stopped')
+          ORDER BY seq DESC LIMIT 1`,
+      )
+      .get() as { projectId: string; type: string } | undefined
+    return row?.type === 'preview_started' ? { projectId: row.projectId } : undefined
+  }
+
   /** Project-creation events, for the picker's "created how / when". */
   projectCreations(): Array<{ name: string; repoUrl?: string; ts: number }> {
     return this.#db

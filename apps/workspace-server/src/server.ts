@@ -1,4 +1,5 @@
 import cors from '@fastify/cors'
+import httpProxy from '@fastify/http-proxy'
 import multipart from '@fastify/multipart'
 import fastifyStatic from '@fastify/static'
 import Fastify, { type FastifyInstance } from 'fastify'
@@ -8,6 +9,8 @@ import type { Config } from './config.ts'
 import type { Github } from './github.ts'
 import type { EventLog } from './log.ts'
 import type { Presence } from './presence.ts'
+import type { PreviewManager } from './preview-manager.ts'
+import type { PreviewTracker } from './preview-tracker.ts'
 import type { ProjectStore } from './projects.ts'
 import type { Pusher } from './push.ts'
 import type { PushStore } from './push-store.ts'
@@ -19,6 +22,7 @@ import { registerEnv } from './routes/env.ts'
 import { registerEvents } from './routes/events.ts'
 import { registerGithub } from './routes/github.ts'
 import { registerPresence } from './routes/presence.ts'
+import { registerPreview } from './routes/preview.ts'
 import { registerProjects } from './routes/projects.ts'
 import { registerPrompt } from './routes/prompt.ts'
 import { registerPush } from './routes/push.ts'
@@ -38,10 +42,12 @@ export interface Services {
   pusher: Pusher
   presence: Presence
   uploads: UploadStore
+  previews: PreviewManager
+  previewTracker: PreviewTracker
 }
 
 export async function buildServer(config: Config, services: Services): Promise<FastifyInstance> {
-  const { log, sessions, projects, builds, github, pushStore, pusher, presence, uploads } = services
+  const { log, sessions, projects, builds, github, pushStore, pusher, presence, uploads, previews, previewTracker } = services
   const app = Fastify({
     logger: config.isDev
       ? { transport: { target: 'pino-pretty', options: { translateTime: 'HH:MM:ss' } } }
@@ -59,6 +65,29 @@ export async function buildServer(config: Config, services: Services): Promise<F
   // them here does not weaken the default 1MB cap on every other route's body.
   await app.register(multipart, { limits: { fileSize: MAX_IMAGE_BYTES, files: MAX_IMAGES_PER_UPLOAD } })
 
+  // Preview (Phase 5): the iframe's traffic (HTML/JS/HMR websocket), reverse-
+  // proxied same-origin rather than a second Tailscale port mapping — see
+  // PHASE-5.md design call 1. `rewritePrefix` mirrors `prefix` exactly so this
+  // is a transparent 1:1 forward: the dev server itself (spawned with
+  // `--base=/preview/:projectId/`) already emits every asset/HMR path
+  // pre-prefixed, confirmed by the spike, so nothing here needs rewriting.
+  // `preHandler` is the guard — only the project actually holding the single
+  // preview slot may be proxied to; never trust a client-supplied port/host.
+  await app.register(httpProxy, {
+    upstream: `http://127.0.0.1:${config.previewPort}`,
+    prefix: '/preview/:projectId',
+    rewritePrefix: '/preview/:projectId',
+    websocket: true,
+    preHandler: (request, reply, done) => {
+      const { projectId } = request.params as { projectId: string }
+      if (previewTracker.activeProjectId() !== projectId) {
+        void reply.code(404).send({ error: 'no active preview for this project' })
+        return
+      }
+      done()
+    },
+  })
+
   app.get('/api/health', async () => ({
     ok: true,
     lastSeq: log.lastSeq(),
@@ -72,6 +101,7 @@ export async function buildServer(config: Config, services: Services): Promise<F
   registerPresence(app, presence)
   registerProjects(app, projects)
   registerBuild(app, builds, projects, config)
+  registerPreview(app, previews, previewTracker, config)
   registerChanges(app, projects)
   registerEnv(app, projects)
   registerThreads(app, log, projects, sessions)

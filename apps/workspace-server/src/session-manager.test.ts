@@ -25,6 +25,8 @@ const BASE: Omit<Config, 'projectsRoot' | 'projectPath' | 'projectId'> = {
   isDev: true,
   webDist: '/nonexistent',
   vapid: undefined,
+  previewPort: 0,
+  previewIdleTimeoutMs: 30 * 60 * 1000,
 }
 
 const init = (sessionId: string): SDKMessage =>
