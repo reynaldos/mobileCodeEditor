@@ -163,7 +163,7 @@ export function App(): React.JSX.Element {
         />
       ) : (
         <>
-          <MessageList items={view.items} projectId={activeProjectId ?? undefined} />
+          <MessageList items={view.items} projectId={activeProjectId ?? undefined} agent={view.agent} />
 
           <PromptBox
             projectId={activeProjectId}

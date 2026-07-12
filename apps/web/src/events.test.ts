@@ -1,7 +1,7 @@
 import { LEGACY_THREAD_ID, type Event, type EventBody } from '@mce/protocol'
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { initialState, reduce, viewOf, type Item, type ProjectState, type State } from './events.ts'
+import { formatDuration, groupTools, initialState, reduce, viewOf, type Item, type ProjectState, type State } from './events.ts'
 
 let seq = 0
 /** Events default to thread 'th' in project 'p'; pass a threadId to place elsewhere. */
@@ -140,4 +140,41 @@ test('session_ended is terminal and carries its reason', () => {
   assert.equal(view(state).agent, 'ended')
   const last = view(state).items.at(-1)
   assert.equal(last?.kind === 'ended' && last.reason, 'interrupted')
+})
+
+test('groupTools collapses a consecutive run of tool calls into one row', () => {
+  const state = run([
+    { type: 'user_prompt', text: 'do it' },
+    { type: 'tool_use', toolUseId: 't1', name: 'Read', input: { file_path: 'a.ts' } },
+    { type: 'tool_result', toolUseId: 't1', ok: true, summary: 'ok' },
+    { type: 'tool_use', toolUseId: 't2', name: 'Edit', input: { file_path: 'a.ts' } },
+    { type: 'tool_result', toolUseId: 't2', ok: true, summary: 'ok' },
+    { type: 'turn_complete' },
+  ])
+
+  const rows = groupTools(view(state).items, false)
+  assert.deepEqual(
+    rows.map((r) => r.kind),
+    ['user', 'toolGroup', 'turn'],
+  )
+  const group = rows[1]
+  assert.equal(group?.kind === 'toolGroup' && group.tools.length, 2)
+  assert.equal(group?.kind === 'toolGroup' && group.running, false)
+})
+
+test('groupTools marks a trailing group "running" only while the agent is still thinking', () => {
+  const state = run([{ type: 'tool_use', toolUseId: 't1', name: 'Bash', input: { command: 'ls' } }])
+  const items = view(state).items
+
+  const stillThinking = groupTools(items, true)
+  assert.equal(stillThinking[0]?.kind === 'toolGroup' && stillThinking[0].running, true)
+
+  const doneThinking = groupTools(items, false)
+  assert.equal(doneThinking[0]?.kind === 'toolGroup' && doneThinking[0].running, false)
+})
+
+test('formatDuration renders minutes and seconds, and never "0s"', () => {
+  assert.equal(formatDuration(0), '1s')
+  assert.equal(formatDuration(45_000), '45s')
+  assert.equal(formatDuration(9 * 60_000 + 31_000), '9m 31s')
 })

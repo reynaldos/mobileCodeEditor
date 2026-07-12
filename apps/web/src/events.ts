@@ -21,6 +21,10 @@ export type Item =
       input: unknown
       status: 'running' | 'ok' | 'error'
       summary?: string
+      /** epoch ms the tool_use arrived; tool groups use this to time themselves. */
+      ts: number
+      /** epoch ms the matching tool_result arrived. */
+      endTs?: number
     }
   | {
       kind: 'approval'
@@ -34,7 +38,7 @@ export type Item =
       status: 'pending' | 'allowed' | 'denied' | 'expired'
       reason?: string
     }
-  | { kind: 'turn'; key: string }
+  | { kind: 'turn'; key: string; ts: number }
   | { kind: 'changes'; key: string; base: string; files: ChangedFile[] }
   | {
       kind: 'question'
@@ -162,7 +166,15 @@ function reduceProject(state: ProjectState, event: Event): ProjectState {
         ...state,
         items: [
           ...state.items,
-          { kind: 'tool', key, toolUseId: event.toolUseId, name: event.name, input: event.input, status: 'running' },
+          {
+            kind: 'tool',
+            key,
+            toolUseId: event.toolUseId,
+            name: event.name,
+            input: event.input,
+            status: 'running',
+            ts: event.ts,
+          },
         ],
         toolIndex: { ...state.toolIndex, [event.toolUseId]: state.items.length },
       }
@@ -173,7 +185,12 @@ function reduceProject(state: ProjectState, event: Event): ProjectState {
       if (item?.kind !== 'tool') return state
       return {
         ...state,
-        items: replace(state.items, index!, { ...item, status: event.ok ? 'ok' : 'error', summary: event.summary }),
+        items: replace(state.items, index!, {
+          ...item,
+          status: event.ok ? 'ok' : 'error',
+          summary: event.summary,
+          endTs: event.ts,
+        }),
       }
     }
 
@@ -239,7 +256,7 @@ function reduceProject(state: ProjectState, event: Event): ProjectState {
     }
 
     case 'turn_complete':
-      return { ...state, agent: 'awaiting_input', items: [...state.items, { kind: 'turn', key }] }
+      return { ...state, agent: 'awaiting_input', items: [...state.items, { kind: 'turn', key, ts: event.ts }] }
 
     case 'turn_changes':
       return {
@@ -266,4 +283,82 @@ function reduceProject(state: ProjectState, event: Event): ProjectState {
     default:
       return state
   }
+}
+
+// ---------------------------------------------------------------------------
+// Tool-call grouping: a view concern only. A burst of Bash/Read/Edit calls
+// during one turn otherwise floods the thread with one row per call; this
+// collapses each consecutive run of `tool` items into a single row that reads
+// "Thinking…" while it's still the tail of a `thinking` conversation, then
+// "Worked Xm Ys" once the agent has moved on. `items` itself stays untouched —
+// callers that need the flat log (tests, the toolIndex patching above) are
+// unaffected.
+// ---------------------------------------------------------------------------
+
+type ToolItem = Extract<Item, { kind: 'tool' }>
+
+export interface ToolGroup {
+  kind: 'toolGroup'
+  key: string
+  tools: ToolItem[]
+  /** Still the tail of an in-progress turn — no end time yet, nothing to expand. */
+  running: boolean
+  durationMs?: number
+  /** Diff totals, if a `turn_changes` event landed right after this group. */
+  changes?: ChangedFile[]
+}
+
+export type DisplayItem = Item | ToolGroup
+
+export function groupTools(items: Item[], agentThinking: boolean): DisplayItem[] {
+  const out: DisplayItem[] = []
+  let i = 0
+  while (i < items.length) {
+    const item = items[i]
+    if (item === undefined) break
+    if (item.kind !== 'tool') {
+      out.push(item)
+      i++
+      continue
+    }
+
+    const start = i
+    while (i < items.length && items[i]?.kind === 'tool') i++
+    const tools = items.slice(start, i) as ToolItem[]
+    const first = tools[0]
+    const last = tools[tools.length - 1]
+    if (!first || !last) break // unreachable: the while loop above ran at least once
+    const running = i === items.length && agentThinking
+
+    // Peek (without consuming) past the group for a `turn` boundary and the
+    // `turn_changes` diff summary that typically follows it, so the group can
+    // report a real end time and file-diff totals without a protocol change.
+    let peek = i
+    let endTs = last.endTs ?? last.ts
+    const maybeTurn = items[peek]
+    if (maybeTurn?.kind === 'turn') {
+      endTs = maybeTurn.ts
+      peek++
+    }
+    const maybeChanges = items[peek]
+    const changes = maybeChanges?.kind === 'changes' ? maybeChanges.files : undefined
+
+    out.push({
+      kind: 'toolGroup',
+      key: `group-${first.key}`,
+      tools,
+      running,
+      durationMs: running ? undefined : Math.max(0, endTs - first.ts),
+      changes,
+    })
+  }
+  return out
+}
+
+/** "9m 31s" / "42s" — never "0s", a group always took at least a second. */
+export function formatDuration(ms: number): string {
+  const totalSec = Math.max(1, Math.round(ms / 1000))
+  const m = Math.floor(totalSec / 60)
+  const s = totalSec % 60
+  return m > 0 ? `${m}m ${s}s` : `${s}s`
 }
