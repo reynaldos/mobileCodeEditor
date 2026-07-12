@@ -1,4 +1,4 @@
-import { ArrowUp, Maximize2, Plus, X } from 'lucide-react'
+import { ArrowUp, Maximize2, Minimize2, Plus, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { sendPrompt, uploadImages } from '../api.ts'
 import { Drawer, DrawerContent, DrawerDescription, DrawerHeader, DrawerTitle } from './ui/drawer.tsx'
@@ -227,7 +227,7 @@ export function PromptBox({
     ref: textareaRef,
     value: text,
     disabled: !ready,
-    placeholder: ready ? 'What should Claude do?' : (disabledReason ?? 'Pick a project and thread'),
+    placeholder: ready ? 'Plan, ask, build…' : (disabledReason ?? 'Pick a project and thread'),
     // Enter inserts a newline on a phone keyboard. Sending is a button.
     onChange: (e: React.ChangeEvent<HTMLTextAreaElement>) => setText(e.target.value),
     onPaste: (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
@@ -266,48 +266,45 @@ export function PromptBox({
           {error && <p className="mb-2 text-[13px] text-del">{error}</p>}
           {imagesStrip}
 
+          {/* One persistent grid: the textarea and both buttons stay mounted
+           *  at the same DOM position at all times — only which grid cell
+           *  they occupy changes between single-line and multiline. The
+           *  previous version swapped between two entirely different JSX
+           *  trees when `isMultiline` flipped, which forced React to
+           *  unmount/remount the buttons (and shuffle the textarea's parent)
+           *  on every keystroke that crossed the line-wrap threshold. On iOS
+           *  that mid-keystroke DOM churn was tearing down the native text
+           *  input session, which is what produced the duplicated/garbled
+           *  characters. Moving grid cells via CSS instead of moving nodes
+           *  via React reconciliation avoids that entirely. */}
           <div
-            className={
+            className="grid items-center gap-x-1 gap-y-1 rounded-3xl border border-line bg-panel-2 py-1.5 pr-3 pl-1.5 focus-within:border-accent"
+            style={
               isMultiline
-                ? 'flex flex-col gap-0.5 rounded-3xl border border-line bg-panel-2 p-1 focus-within:border-accent'
-                : 'flex items-end gap-1 rounded-3xl border border-line bg-panel-2 py-1.5 pr-1.5 pl-1 focus-within:border-accent'
+                ? { gridTemplateColumns: 'auto 1fr auto', gridTemplateAreas: '"text text expand" "add . send"' }
+                : { gridTemplateColumns: 'auto 1fr auto', gridTemplateAreas: '"add text send"' }
             }
           >
-            {isMultiline ? (
-              <>
-                {/* Text stays top-anchored and left-aligned with the `+` button
-                 *  below it; the buttons get their own row so they never crowd
-                 *  the last line of text. `key="textarea"` matches the one below
-                 *  so React patches the existing node in place instead of
-                 *  unmounting/remounting it when this branch flips — otherwise
-                 *  the field (and the on-screen keyboard) loses focus the moment
-                 *  a line wraps past the first. */}
-                <textarea
-                  key="textarea"
-                  {...textareaCommonProps}
-                  rows={1}
-                  className="prompt-input max-h-40 min-h-9 resize-none bg-transparent px-2 pt-1.5 pb-1 text-fg outline-none"
-                />
-                <div className="flex shrink-0 items-center justify-between px-0.5 pb-0.5">
-                  {addPhotoButton}
-                  <div className="flex items-center gap-1">
-                    {expandButton}
-                    {sendButton}
-                  </div>
-                </div>
-              </>
-            ) : (
-              <>
-                {addPhotoButton}
-                <textarea
-                  key="textarea"
-                  {...textareaCommonProps}
-                  rows={1}
-                  className="prompt-input max-h-40 min-h-9 flex-1 resize-none bg-transparent px-1 py-1.5 text-fg outline-none"
-                />
-                {sendButton}
-              </>
-            )}
+            <div style={{ gridArea: 'add' }} className="self-end">
+              {addPhotoButton}
+            </div>
+            <textarea
+              {...textareaCommonProps}
+              rows={1}
+              style={{ gridArea: 'text' }}
+              className="prompt-input max-h-40 min-h-9 resize-none self-center bg-transparent px-2 py-1.5 text-fg outline-none"
+            />
+            {/* Stays mounted even on a single line — just hidden — so
+             *  toggling `isMultiline` never adds/removes this node either. */}
+            <div
+              style={{ gridArea: 'expand', display: isMultiline ? undefined : 'none' }}
+              className="justify-self-end self-start"
+            >
+              {expandButton}
+            </div>
+            <div style={{ gridArea: 'send' }} className="self-end justify-self-end">
+              {sendButton}
+            </div>
           </div>
         </div>
       )}
@@ -321,15 +318,30 @@ export function PromptBox({
             <DrawerTitle>Prompt</DrawerTitle>
             <DrawerDescription>Write a longer prompt for Claude.</DrawerDescription>
           </DrawerHeader>
+
+          {/* Mirrors the compact pill's expand button: a bare icon tucked
+           *  into the corner, not a bordered toolbar button. */}
+          <button
+            type="button"
+            aria-label="Collapse"
+            onClick={() => setExpanded(false)}
+            className="absolute top-3 right-3 z-10 grid size-9 place-items-center rounded-full text-muted"
+          >
+            <Minimize2 size={16} />
+          </button>
+
           <div className="flex min-h-0 flex-1 flex-col px-4 pt-2">
             {error && <p className="mb-2 shrink-0 text-[13px] text-del">{error}</p>}
             {imagesStrip}
             <textarea
               {...textareaCommonProps}
-              className="prompt-input min-h-0 flex-1 resize-none bg-transparent pb-2 text-fg outline-none"
+              className="prompt-input min-h-0 flex-1 resize-none bg-transparent pr-10 pb-2 text-fg outline-none"
             />
           </div>
-          <div className="flex shrink-0 items-center justify-between gap-1 border-t border-line px-4 py-2 pb-[calc(10px+env(safe-area-inset-bottom,0px))]">
+
+          {/* No border/background toolbar — the buttons float directly on
+           *  the drawer body, same as the reference design. */}
+          <div className="flex shrink-0 items-center justify-between px-4 pt-1 pb-[calc(12px+env(safe-area-inset-bottom,0px))]">
             {addPhotoButton}
             {sendButton}
           </div>
