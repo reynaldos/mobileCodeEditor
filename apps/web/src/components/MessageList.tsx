@@ -239,14 +239,17 @@ function Row({ item, projectId }: { item: Item; projectId?: string }): React.JSX
     }
 
     case 'turn':
-      return <div className={SEPARATOR}>done</div>
+      // A subtle divider marks the turn boundary — no "DONE" label.
+      return <div className="my-0.5 h-px w-16 self-center rounded-full bg-line" />
 
     case 'changes':
       return <ChangesView base={item.base} files={item.files} projectId={projectId} />
 
     case 'ended':
+      // A clean finish is silent; only surface error/interrupted — those matter.
+      if (item.reason === 'complete') return null
       return (
-        <div className={`${SEPARATOR} ${item.reason === 'complete' ? '' : 'text-warn'}`}>
+        <div className={`${SEPARATOR} text-warn`}>
           session {item.reason}
           {item.message && <span className="normal-case tracking-normal">{item.message}</span>}
         </div>
