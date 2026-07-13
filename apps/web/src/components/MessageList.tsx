@@ -23,6 +23,9 @@ const DOT: Record<'running' | 'ok' | 'error', string> = {
 
 const SEPARATOR = 'flex justify-center gap-2 py-1 text-[11px] uppercase tracking-[0.08em] text-muted'
 
+/** How close to the bottom (px) still counts as "following" the stream. */
+const BOTTOM_THRESHOLD = 120
+
 const EDIT_TOOLS = new Set(['Edit', 'Write', 'NotebookEdit'])
 const EXPLORE_TOOLS = new Set(['Read', 'Glob', 'Grep'])
 
@@ -48,23 +51,38 @@ const sumFiles = (files: { additions: number; deletions: number }[], key: 'addit
   files.reduce((n, f) => n + f[key], 0)
 
 export function MessageList({ items, projectId, agent }: Props): React.JSX.Element {
+  const scroller = useRef<HTMLDivElement>(null)
   const bottom = useRef<HTMLDivElement>(null)
+  // Whether the reader is parked at (or near) the bottom. Updated on every scroll
+  // and consulted before auto-scrolling, so streaming output only follows the
+  // bottom when they're already there — never yanking them off older content.
+  const atBottom = useRef(true)
   const rows = useMemo(() => groupTools(items, agent === 'thinking'), [items, agent])
 
   const pendingKey = items.find(
     (i) => (i.kind === 'approval' || i.kind === 'question') && i.status === 'pending',
   )?.key
 
+  function onScroll(): void {
+    const el = scroller.current
+    if (el) atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < BOTTOM_THRESHOLD
+  }
+
   useEffect(() => {
-    // A pending approval blocks the agent, so it must never sit below the fold.
-    // Jump instantly rather than animating — a smooth scroll started during a
-    // long assistant message lands short, and the card ends up unreachable.
-    bottom.current?.scrollIntoView({ behavior: pendingKey ? 'auto' : 'smooth', block: 'end' })
+    // A pending approval/question blocks the agent, so it must never sit below the
+    // fold: always jump to it (instantly — a smooth scroll started mid-message
+    // lands short and leaves the card unreachable). Otherwise only follow new
+    // output when the reader is already at the bottom.
+    if (pendingKey) {
+      bottom.current?.scrollIntoView({ behavior: 'auto', block: 'end' })
+    } else if (atBottom.current) {
+      bottom.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
+    }
   }, [items.length, pendingKey])
 
   return (
     // `messages` carries the flex-shrink guard in styles.css. Do not rename it.
-    <div className="messages flex flex-1 flex-col gap-2.5 overflow-y-auto p-3.5">
+    <div ref={scroller} onScroll={onScroll} className="messages flex flex-1 flex-col gap-2.5 overflow-y-auto p-3.5">
       {items.length === 0 && (
         <p className="m-auto max-w-[30ch] text-center text-muted">
           Nothing yet. Tell Claude what to do — it&rsquo;s working in your repo, and every
