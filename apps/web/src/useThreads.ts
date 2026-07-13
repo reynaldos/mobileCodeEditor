@@ -4,26 +4,36 @@ import { fetchThreads } from './api.ts'
 
 /**
  * The active project's thread list (authoritative — the server derives it from
- * the log). Just the list: the active thread is App state, since by default we
- * start a fresh thread on project select and only reach old ones via history.
+ * the log). Just the list: the active thread is App state — a project with no
+ * threads yet starts a fresh one automatically, otherwise you land on the
+ * thread list and pick (or start) one from there.
  *
  * `refresh` runs on project change and as the stream advances, so a new thread
- * or message reorders the list.
+ * or message reorders the list. `loading` is true only for the initial fetch of
+ * a given project (reset on every `projectId` change, alongside clearing stale
+ * `threads` from whichever project was previously active) — a `refresh` fired
+ * by conversation activity doesn't re-flip it, so the list doesn't flicker back
+ * to a loading state on every event.
  */
-export function useThreads(projectId: string | null): { threads: Thread[]; refresh: () => Promise<void> } {
+export function useThreads(projectId: string | null): { threads: Thread[]; loading: boolean; refresh: () => Promise<void> } {
   const [threads, setThreads] = useState<Thread[]>([])
+  const [loading, setLoading] = useState(true)
 
   const refresh = useCallback(async () => {
     if (!projectId) {
       setThreads([])
+      setLoading(false)
       return
     }
     setThreads(await fetchThreads(projectId).catch(() => [] as Thread[]))
+    setLoading(false)
   }, [projectId])
 
   useEffect(() => {
+    setThreads([])
+    setLoading(true)
     void refresh()
   }, [refresh])
 
-  return { threads, refresh }
+  return { threads, loading, refresh }
 }

@@ -23,10 +23,15 @@ export function PromptBox({
   projectId,
   threadId,
   disabledReason,
+  onSubmitted,
 }: {
   projectId: string | null
   threadId: string | null
   disabledReason?: string
+  /** Fired after a send actually goes through — e.g. the thread-list "home"
+   *  screen uses this to know its bottom prompt bar just minted a real thread,
+   *  so it can switch the app into that conversation. */
+  onSubmitted?: () => void
 }): React.JSX.Element {
   const [text, setText] = useState('')
   const [images, setImages] = useState<PendingImage[]>([])
@@ -156,6 +161,7 @@ export function PromptBox({
       setImages([])
       setExpanded(false)
       // The `user_prompt` event comes back over SSE and renders itself.
+      onSubmitted?.()
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {

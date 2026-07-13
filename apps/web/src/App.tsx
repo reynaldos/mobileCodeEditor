@@ -1,6 +1,6 @@
 import { LEGACY_THREAD_ID } from '@mce/protocol'
 import { ChevronDown, History, KeyRound, MessageCirclePlus, MonitorPlay } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { deleteThread, fetchHealth, type Health, renameThread } from './api.ts'
 import { ActionsMenu } from './components/ActionsMenu.tsx'
 import { BuildModal } from './components/BuildModal.tsx'
@@ -11,22 +11,22 @@ import { PreviewDrawer } from './components/PreviewDrawer.tsx'
 import { ProjectPicker } from './components/ProjectPicker.tsx'
 import { PromptBox } from './components/PromptBox.tsx'
 import { StatusDot } from './components/StatusDot.tsx'
-import { ThreadList } from './components/ThreadList.tsx'
-import { viewOf } from './events.ts'
+import { ThreadsHome } from './components/ThreadsHome.tsx'
+import { threadStatus, viewOf } from './events.ts'
 import { useBuilds } from './useBuilds.ts'
 import { useEventStream, useKeyboardInset } from './useEventStream.ts'
 import { usePreview } from './usePreview.ts'
 import { useProjects } from './useProjects.ts'
 import { useThreads } from './useThreads.ts'
 
-/** Which overlay is up, if any. null = the conversation. */
-type Overlay = 'projects' | 'threads' | null
+/** Which overlay is up, if any. null = the conversation (or the thread list — see `activeThreadId`). */
+type Overlay = 'projects' | null
 
 export function App(): React.JSX.Element {
   const { state, connection } = useEventStream()
   const projectsState = useProjects()
   const { projects, activeId: activeProjectId } = projectsState
-  const { threads, refresh: refreshThreads } = useThreads(activeProjectId)
+  const { threads, loading: threadsLoading, refresh: refreshThreads } = useThreads(activeProjectId)
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null)
   const [health, setHealth] = useState<Health | undefined>()
   const [overlay, setOverlay] = useState<Overlay>(null)
@@ -62,12 +62,17 @@ export function App(): React.JSX.Element {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.lastSeq])
 
-  // Selecting (or restoring) a project starts a fresh thread by default; you
-  // reach previous threads through the history icon.
+  // Selecting (or restoring) a project lands on its thread list (`activeThreadId
+  // === null` renders <ThreadsHome> below) — except a project with no threads
+  // yet has nothing to list, so it skips straight to a fresh one.
   useEffect(() => {
-    if (activeProjectId) startNewThread()
-    else setActiveThreadId(null)
-  }, [activeProjectId, startNewThread])
+    setActiveThreadId(null)
+  }, [activeProjectId])
+
+  useEffect(() => {
+    if (activeProjectId && !threadsLoading && threads.length === 0 && activeThreadId === null) startNewThread()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeProjectId, threadsLoading, threads.length])
 
   // New conversation activity → the thread list may have reordered / grown.
   useEffect(() => {
@@ -86,22 +91,25 @@ export function App(): React.JSX.Element {
   async function onDeleteThread(threadId: string): Promise<void> {
     if (!activeProjectId) return
     await deleteThread(activeProjectId, threadId).catch(() => undefined)
-    if (threadId === activeThreadId) startNewThread()
+    // Back to the thread list, not straight to a new thread — if that was the
+    // last one, the effect above starts a fresh thread for you anyway.
+    if (threadId === activeThreadId) setActiveThreadId(null)
     await refreshThreads()
   }
   const view = viewOf(state, activeThreadId)
   const activeProject = projects.find((p) => p.id === activeProjectId)
   const projectName = activeProject?.name
   // Every thread the event log has seen gets a live `agent` projection (see
-  // events.ts), not just the active one — so the history list can flag threads
-  // still actively working without any extra fetching.
-  const workingThreadIds = useMemo(
-    () => new Set(Object.entries(state.byThread).filter(([, s]) => s.agent === 'thinking').map(([id]) => id)),
-    [state.byThread],
-  )
+  // events.ts), not just the active one — so the thread list can badge threads
+  // still working / needing a decision without any extra fetching.
+  const statusOf = useCallback((threadId: string) => threadStatus(state.byThread[threadId]?.agent), [state.byThread])
   // While a project sets up, the build modal replaces the thread — leaving the
   // header usable so you can switch away and come back to it, still building.
   const showBuild = activeProjectId !== null && builds.shouldShow(activeProjectId)
+  // No thread picked yet (just landed on the project, or backed out via
+  // "Previous threads") → the thread list, not a conversation. Building takes
+  // priority — a project that's still cloning has no threads worth showing.
+  const showThreadsHome = activeProjectId !== null && activeThreadId === null && !showBuild
 
   return (
     // `app` owns 100dvh and the keyboard inset. See styles.css.
@@ -109,7 +117,7 @@ export function App(): React.JSX.Element {
       <header className="flex shrink-0 items-center justify-between gap-3 border-b border-line bg-panel px-3.5 pb-2.5 pt-[calc(10px+env(safe-area-inset-top,0px))]">
         <button className="flex min-w-0 flex-col items-start" onClick={() => setOverlay('projects')} title="Switch project">
           <span className="flex min-w-0 items-center gap-1.5">
-            {activeProjectId && <StatusDot agent={view.agent} />}
+            {activeProjectId && <StatusDot connection={connection} />}
             <span className="truncate font-semibold">{projectName ?? 'Projects'}</span>
             <ChevronDown className="size-4 shrink-0 text-muted" />
           </span>
@@ -124,7 +132,7 @@ export function App(): React.JSX.Element {
                   key: 'threads',
                   label: 'Previous threads',
                   icon: History,
-                  onClick: () => setOverlay((o) => (o === 'threads' ? null : 'threads')),
+                  onClick: () => setActiveThreadId(null),
                 },
                 {
                   key: 'new-thread',
@@ -180,6 +188,17 @@ export function App(): React.JSX.Element {
             setOverlay('projects')
           }}
         />
+      ) : showThreadsHome && activeProjectId ? (
+        <ThreadsHome
+          projectId={activeProjectId}
+          threads={threads}
+          loading={threadsLoading}
+          statusOf={statusOf}
+          onSelect={(id) => setActiveThreadId(id)}
+          onRename={(id, title) => void onRenameThread(id, title)}
+          onDelete={(id) => void onDeleteThread(id)}
+          onStarted={(id) => setActiveThreadId(id)}
+        />
       ) : (
         <>
           <MessageList items={view.items} projectId={activeProjectId ?? undefined} agent={view.agent} />
@@ -204,7 +223,7 @@ export function App(): React.JSX.Element {
           activeId={activeProjectId}
           failed={state.failed}
           onSelect={(id) => {
-            projectsState.setActiveId(id) // the effect above starts a fresh thread
+            projectsState.setActiveId(id) // the effects above land on its thread list (or a fresh thread if it has none)
             setOverlay(null)
           }}
           onStarted={(projectId) => {
@@ -222,21 +241,6 @@ export function App(): React.JSX.Element {
       {/* Mounted regardless of the active project — a peeked preview for a project you've since
           navigated away from in the main nav stays alive and visible, per PHASE-5.md design call 7. */}
       <PreviewDrawer preview={preview} projects={projects} />
-
-      {overlay === 'threads' && activeProjectId && (
-        <ThreadList
-          threads={threads}
-          activeThreadId={activeThreadId}
-          workingThreadIds={workingThreadIds}
-          onSelect={(id) => {
-            setActiveThreadId(id)
-            setOverlay(null)
-          }}
-          onRename={(id, title) => void onRenameThread(id, title)}
-          onDelete={(id) => void onDeleteThread(id)}
-          onClose={() => setOverlay(null)}
-        />
-      )}
     </div>
   )
 }

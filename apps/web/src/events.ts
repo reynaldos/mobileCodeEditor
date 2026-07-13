@@ -52,6 +52,18 @@ export type Item =
 
 export type AgentState = 'idle' | 'thinking' | 'awaiting_approval' | 'awaiting_input' | 'ended'
 
+/** The three-way badge a thread list shows per row — coarser than `AgentState`
+ *  (which distinguishes idle/awaiting_input/ended for the conversation header)
+ *  because a list of many threads only needs "still working" vs "needs a
+ *  decision" vs "nothing going on." */
+export type ThreadStatus = 'active' | 'needs-action' | 'inactive'
+
+export function threadStatus(agent: AgentState | undefined): ThreadStatus {
+  if (agent === 'thinking') return 'active'
+  if (agent === 'awaiting_approval') return 'needs-action'
+  return 'inactive'
+}
+
 /** One project's conversation view. */
 export interface ProjectState {
   items: Item[]
