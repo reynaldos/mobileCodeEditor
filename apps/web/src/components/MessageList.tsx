@@ -80,6 +80,15 @@ export function MessageList({ items, projectId, agent }: Props): React.JSX.Eleme
     }
   }, [items.length, pendingKey])
 
+  // The initial-fetch beat: right after a prompt is sent, while we wait on the
+  // agent's first output. Show a single pulsing bubble so that latency doesn't
+  // read as a hang. As soon as anything streams — a reply or a tool call — the
+  // last row is no longer the user's own message, the bubble drops, and the
+  // normal "Thinking…" tool UI takes over. So it never lingers past the first
+  // response.
+  const last = rows[rows.length - 1]
+  const waiting = agent === 'thinking' && last?.kind === 'user'
+
   return (
     // `messages` carries the flex-shrink guard in styles.css. Do not rename it.
     <div ref={scroller} onScroll={onScroll} className="messages flex flex-1 flex-col gap-2.5 overflow-y-auto p-3.5">
@@ -97,8 +106,21 @@ export function MessageList({ items, projectId, agent }: Props): React.JSX.Eleme
           <Row key={row.key} item={row} projectId={projectId} />
         ),
       )}
+      {waiting && <TypingBubble />}
       <div ref={bottom} />
     </div>
+  )
+}
+
+/** The initial-fetch indicator: a white bubble the size of the "Thinking…" dot,
+ *  plus dots cycling . -> .. -> ..., so latency before the first output reads as
+ *  alive rather than hung. */
+function TypingBubble(): React.JSX.Element {
+  return (
+    <span className="flex items-center gap-1.5 self-start px-0.5 py-1 text-xs">
+      <span className="size-1.5 shrink-0 animate-pulse-dot rounded-full bg-fg" />
+      <span className="animate-dots text-muted" />
+    </span>
   )
 }
 
