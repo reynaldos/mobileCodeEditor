@@ -11,6 +11,7 @@ import {
   removeProject,
 } from '../api.ts'
 import { useDebounced } from '../useDebounced.ts'
+import { RowMenu } from './RowMenu.tsx'
 import {
   Dialog,
   DialogClose,
@@ -63,27 +64,27 @@ export function ProjectPicker({ projects, activeId, failed, onSelect, onStarted,
       <div className="flex-1 overflow-y-auto p-4">
         <ul className="flex flex-col gap-2">
           {projects.map((p) => (
-            <li key={p.id} className="group flex items-center gap-1.5">
-              <button
-                className={`min-w-0 flex-1 rounded-xl border p-3 text-left ${
-                  p.id === activeId ? 'border-accent bg-panel' : 'border-line bg-panel-2'
-                }`}
-                onClick={() => onSelect(p.id)}
-              >
+            <li
+              key={p.id}
+              className={`group flex items-center rounded-xl border ${
+                p.id === activeId ? 'border-accent bg-panel' : 'border-line bg-panel-2'
+              }`}
+            >
+              <button className="min-w-0 flex-1 p-3 text-left" onClick={() => onSelect(p.id)}>
                 <span className="block truncate font-medium">{p.name}</span>
                 <span className="mt-0.5 block truncate text-[12px] text-muted">
                   {p.repoUrl ?? 'local'} {p.branch ? `· ${p.branch}` : ''}
                 </span>
                 {failed[p.name] && <div className="mt-1 text-[12px] text-del">{failed[p.name]}</div>}
               </button>
-              <button
-                className="flex size-9 shrink-0 items-center justify-center rounded-lg text-muted opacity-60 transition-opacity hover:bg-panel-2 group-hover:opacity-100"
-                title="Remove project"
-                aria-label={`Remove ${p.name}`}
-                onClick={() => setRemoving(p)}
-              >
-                <Trash2 className="size-4" />
-              </button>
+              <span className="shrink-0 pr-1.5">
+                <RowMenu
+                  label={`Actions for ${p.name}`}
+                  actions={[
+                    { key: 'remove', label: 'Remove project', icon: Trash2, destructive: true, onClick: () => setRemoving(p) },
+                  ]}
+                />
+              </span>
             </li>
           ))}
           {projects.length === 0 && (

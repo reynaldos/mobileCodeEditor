@@ -3,6 +3,7 @@ import { Check, Pencil, Search, Trash2, X } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import type { ThreadStatus } from '../events.ts'
 import { PromptBox } from './PromptBox.tsx'
+import { RowMenu, type RowMenuAction } from './RowMenu.tsx'
 
 interface Props {
   projectId: string
@@ -154,6 +155,25 @@ function Row({
     )
   }
 
+  // Legacy (read-only) threads can't be renamed — there's no thread_id to title —
+  // but they can be deleted, so they get a Delete-only menu.
+  const menuActions: RowMenuAction[] = [
+    ...(thread.legacy
+      ? []
+      : [
+          {
+            key: 'rename',
+            label: 'Rename',
+            icon: Pencil,
+            onClick: () => {
+              setDraft(thread.title)
+              setMode('editing')
+            },
+          },
+        ]),
+    { key: 'delete', label: 'Delete', icon: Trash2, destructive: true, onClick: () => setMode('confirm-delete') },
+  ]
+
   return (
     <li className="group flex items-center rounded-lg hover:bg-panel-2">
       <button className="min-w-0 flex-1 px-2 py-2.5 text-left" onClick={onSelect}>
@@ -164,7 +184,7 @@ function Row({
         <span className="block text-[11px] text-muted">{thread.legacy ? 'read-only' : when(thread.lastActivity)}</span>
       </button>
 
-      {thread.legacy ? null : mode === 'confirm-delete' ? (
+      {mode === 'confirm-delete' ? (
         <span className="flex shrink-0 items-center gap-1 pr-1.5">
           <span className="text-[11px] text-del">Delete?</span>
           <IconBtn label="Confirm delete" onClick={onDelete}>
@@ -175,19 +195,8 @@ function Row({
           </IconBtn>
         </span>
       ) : (
-        <span className="flex shrink-0 items-center gap-0.5 pr-1.5 opacity-60 transition-opacity group-hover:opacity-100">
-          <IconBtn
-            label="Rename"
-            onClick={() => {
-              setDraft(thread.title)
-              setMode('editing')
-            }}
-          >
-            <Pencil className="size-4 text-muted" />
-          </IconBtn>
-          <IconBtn label="Delete" onClick={() => setMode('confirm-delete')}>
-            <Trash2 className="size-4 text-muted" />
-          </IconBtn>
+        <span className="shrink-0 pr-1">
+          <RowMenu actions={menuActions} />
         </span>
       )}
     </li>

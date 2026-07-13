@@ -1,4 +1,5 @@
 import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk'
+import { LEGACY_THREAD_ID } from '@mce/protocol'
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
@@ -319,6 +320,30 @@ test('threads: new thread then list it', async () => {
   assert.equal(list.threads[0]?.id, threadId)
   // Titleized from the first prompt: sentence-cased, filler stripped.
   assert.equal(list.threads[0]?.title, 'Add a title here')
+})
+
+test('threads: the legacy (read-only) bucket is deletable', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'mce-proot-'))
+  mkdirSync(join(root, 'app'))
+  execFileSync('git', ['-C', join(root, 'app'), 'init', '-q'])
+  const { base, log } = await boot({ ...DEV, projectsRoot: root })
+
+  // A pre-threads conversation: an event with no threadId lands in the legacy bucket.
+  log.append({ sessionId: 's', projectId: 'app', ts: 1, type: 'user_prompt', text: 'old conversation' })
+
+  const before = (await (await fetch(`${base}/api/projects/app/threads`)).json()) as {
+    threads: Array<{ id: string; legacy?: boolean }>
+  }
+  assert.equal(before.threads.length, 1)
+  assert.equal(before.threads[0]?.id, LEGACY_THREAD_ID)
+  assert.equal(before.threads[0]?.legacy, true)
+
+  const deleted = await fetch(`${base}/api/projects/app/threads/${LEGACY_THREAD_ID}`, { method: 'DELETE' })
+  assert.equal(deleted.status, 204)
+
+  // Hidden by the NULL-thread `thread_deleted` — the bucket drops out of the list.
+  const afterList = (await (await fetch(`${base}/api/projects/app/threads`)).json()) as { threads: unknown[] }
+  assert.deepEqual(afterList.threads, [])
 })
 
 test('github routes 503 when gh is not configured (boot default)', async () => {

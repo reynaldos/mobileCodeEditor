@@ -62,13 +62,18 @@ export function registerThreads(
 
   // Delete a thread — stop any live session, then hide it with a `thread_deleted`
   // event. The conversation stays in the log; it just drops out of the list.
+  //
+  // The legacy bucket is deletable too (read-only means you can't *write into* it,
+  // not that it's permanent): it has thread_id NULL and no live session, so we
+  // append a NULL-thread `thread_deleted`, which its GROUP BY thread_id fold picks
+  // up and hides the whole earlier-conversations bucket.
   app.delete('/api/projects/:projectId/threads/:threadId', async (request, reply) => {
     const { projectId, threadId } = request.params as { projectId: string; threadId: string }
     if (!projects.exists(projectId)) return reply.code(404).send({ error: 'no such project' })
-    if (threadId === LEGACY_THREAD_ID) return reply.code(400).send({ error: 'the legacy thread is read-only' })
 
-    await sessions.closeThread(projectId, threadId)
-    log.append({ type: 'thread_deleted', sessionId: 'system', projectId, threadId, ts: Date.now() })
+    const legacy = threadId === LEGACY_THREAD_ID
+    if (!legacy) await sessions.closeThread(projectId, threadId)
+    log.append({ type: 'thread_deleted', sessionId: 'system', projectId, ...(legacy ? {} : { threadId }), ts: Date.now() })
     return reply.code(204).send()
   })
 }
