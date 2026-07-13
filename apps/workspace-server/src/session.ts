@@ -31,6 +31,18 @@ const AUTO_APPROVED = new Set(['Read', 'Grep', 'Glob'])
 
 const SUMMARY_MAX = 200
 
+/**
+ * Tools whose full result body we keep (not just the one-line summary), because
+ * the UI renders it: Bash as an IN/OUT card, the Task* family as the live
+ * task-list card, and `Task` (sub-agent) whose result is the agent's final
+ * report — shown in the sub-agent drawer. Everything else (file reads
+ * especially) would only bloat the log.
+ */
+const CAPTURE_OUTPUT = new Set(['Bash', 'TaskCreate', 'TaskUpdate', 'TaskList', 'Task'])
+
+/** Cap on a captured result body — enough for a task list or a command's output. */
+const OUTPUT_MAX = 16_000
+
 /** How long an idle session gets to return on its own before we abort it. */
 const SHUTDOWN_GRACE_MS = 2_000
 
@@ -91,6 +103,8 @@ export class AgentSession {
   readonly #queue = new AsyncQueue<SDKUserMessage>()
   readonly #pending = new Map<string, Pending>()
   readonly #pendingQuestions = new Map<string, PendingQuestion>()
+  /** toolUseId -> tool name, so a `tool_result` knows whether to keep its output. */
+  readonly #toolNames = new Map<string, string>()
   readonly #abort = new AbortController()
 
   #query: Query | undefined
@@ -133,6 +147,23 @@ export class AgentSession {
       prompt: this.#queue,
       options: {
         cwd: this.#projectPath,
+        // Opt into Claude Code's default system prompt. Without it the Agent SDK
+        // runs with an essentially empty prompt — the model still HAS TodoWrite
+        // and the Task* tools, but nothing tells it to reach for them, so it
+        // writes plans as prose instead of driving the live task-list card. This
+        // is the preset built into the SDK, not on-disk settings, so it doesn't
+        // reintroduce the pre-approvals `settingSources: []` keeps out.
+        //
+        // The `append` nudges TodoWrite specifically: even with the preset the
+        // model leans on prose plans (or sub-agents), and the card only renders
+        // off a real TodoWrite/Task* call — so without this it rarely shows.
+        // Scoped to multi-step work so trivial turns stay quiet.
+        systemPrompt: {
+          type: 'preset',
+          preset: 'claude_code',
+          append:
+            'For any task that takes more than a couple of steps, call the TodoWrite tool up front to lay out the plan, then keep it updated as you go — mark items in_progress and completed in real time. Prefer a TodoWrite checklist over describing the plan only in prose. Skip it for trivial one- or two-step tasks.',
+        },
         // AskUserQuestion arrives here too, as an ordinary tool_use — confirmed
         // empirically (it was showing up as a JSON approval card before
         // #canUseTool special-cased it below). There's no separate dialog
@@ -434,15 +465,21 @@ export class AgentSession {
       }
 
       case 'assistant': {
+        // Set when the message came from inside a sub-agent — the toolUseId of
+        // the launching `Task` call. The SDK streams sub-agent tool calls to us
+        // as a heartbeat; carrying this through lets the client group them.
+        const parent = message.parent_tool_use_id ?? undefined
         for (const block of message.message.content) {
           if (block.type === 'text' && block.text.trim()) {
             this.#append({ type: 'assistant_text', text: block.text })
           } else if (block.type === 'tool_use') {
+            this.#toolNames.set(block.id, block.name)
             this.#append({
               type: 'tool_use',
               toolUseId: block.id,
               name: block.name,
               input: block.input,
+              ...(parent ? { parentToolUseId: parent } : {}),
             })
           }
         }
@@ -452,13 +489,17 @@ export class AgentSession {
       case 'user': {
         const content = message.message.content
         if (typeof content === 'string') return
+        const parent = message.parent_tool_use_id ?? undefined
         for (const block of content) {
           if (block.type !== 'tool_result') continue
+          const name = this.#toolNames.get(block.tool_use_id)
           this.#append({
             type: 'tool_result',
             toolUseId: block.tool_use_id,
             ok: block.is_error !== true,
             summary: summarize(block.content),
+            ...(name && CAPTURE_OUTPUT.has(name) ? { output: fullOutput(block.content) } : {}),
+            ...(parent ? { parentToolUseId: parent } : {}),
           })
         }
         return
@@ -606,4 +647,24 @@ function summarize(content: unknown): string {
   const oneLine = text.replace(/\s+/g, ' ').trim()
   if (!oneLine) return '(no output)'
   return oneLine.length > SUMMARY_MAX ? `${oneLine.slice(0, SUMMARY_MAX - 1)}…` : oneLine
+}
+
+/**
+ * The full result body with newlines preserved (unlike `summarize`), capped —
+ * for the Bash IN/OUT card and the Task* task-list card. Redaction runs later,
+ * in the log, so secrets in the output are scrubbed before it's stored.
+ */
+function fullOutput(content: unknown): string {
+  let text: string
+  if (typeof content === 'string') {
+    text = content
+  } else if (Array.isArray(content)) {
+    text = content
+      .map((block) => (block && typeof block === 'object' && 'text' in block ? String(block.text) : ''))
+      .join('\n')
+  } else {
+    text = ''
+  }
+  text = text.trimEnd()
+  return text.length > OUTPUT_MAX ? `${text.slice(0, OUTPUT_MAX)}\n… (truncated)` : text
 }

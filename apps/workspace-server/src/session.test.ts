@@ -127,6 +127,45 @@ test('a turn maps SDK messages onto the log', async () => {
   await session.stop()
 })
 
+test('sub-agent tool calls carry parentToolUseId; the main agent\'s do not', async () => {
+  const { session, log } = makeSession(
+    fakeQuery(async function* ({ prompt }) {
+      yield init()
+      for await (const _ of prompt) {
+        // The main agent launches a sub-agent (no parent on the launch itself)…
+        yield useTool('T1', 'Task', { description: 'go', subagent_type: 'design' })
+        // …which streams a tool call back, tagged with the Task's id as its parent.
+        yield {
+          type: 'assistant',
+          parent_tool_use_id: 'T1',
+          message: { content: [{ type: 'tool_use', id: 's1', name: 'Read', input: { file_path: 'a.ts' } }] },
+        } as unknown as SDKMessage
+        yield {
+          type: 'user',
+          parent_tool_use_id: 'T1',
+          message: { content: [{ type: 'tool_result', tool_use_id: 's1', is_error: false, content: 'body' }] },
+        } as unknown as SDKMessage
+        yield done()
+      }
+    }),
+  )
+
+  session.start()
+  session.prompt('go')
+  await waitFor(() => session.status === 'awaiting_input', 'turn to finish')
+
+  const events = log.replaySince(0)
+  const task = events.find((e) => e.type === 'tool_use' && e.toolUseId === 'T1')
+  const childUse = events.find((e) => e.type === 'tool_use' && e.toolUseId === 's1')
+  const childResult = events.find((e) => e.type === 'tool_result' && e.toolUseId === 's1')
+
+  assert.equal(task?.type === 'tool_use' && task.parentToolUseId, undefined, 'the launch itself has no parent')
+  assert.equal(childUse?.type === 'tool_use' && childUse.parentToolUseId, 'T1')
+  assert.equal(childResult?.type === 'tool_result' && childResult.parentToolUseId, 'T1')
+
+  await session.stop()
+})
+
 test('a re-emitted system/init does not start a second session', async () => {
   // The SDK emits init again on later turns. Observed in a real session: two
   // session_started rows for one AgentSession, same claude session id.

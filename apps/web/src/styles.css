@@ -114,9 +114,6 @@ body {
 /* The initial-fetch dots — grow 0 -> 4 then reset, so a wait reads as alive. */
 @keyframes dots {
   0% {
-    content: ' ';
-  }
-  20% {
     content: '.';
   }
   40% {

@@ -1,3 +1,5 @@
+import { Check } from 'lucide-react'
+
 /**
  * A small, dependency-free Markdown-ish renderer for assistant replies.
  *
@@ -42,6 +44,8 @@ const HEADING_CLASS: Record<number, string> = {
 const HEADING_RE = /^(#{1,4})\s+(.*)$/
 const ORDERED_RE = /^\d+[.)]\s+(.*)$/
 const BULLET_RE = /^[-*]\s+(.*)$/
+/** A bullet item's content, as a task: `[ ]`/`[x]` (GitHub) or the bare `[]` the model often writes. */
+const TASK_ITEM_RE = /^\[([ xX]?)\]\s+(.*)$/
 const FENCE_RE = /^```(\S*)$/
 const STRUCTURAL_RE = [HEADING_RE, ORDERED_RE, BULLET_RE]
 const isStructural = (line: string): boolean => STRUCTURAL_RE.some((re) => re.test(line))
@@ -135,6 +139,32 @@ export function Markdown({ text }: { text: string }): React.JSX.Element {
         next = lines[i]
       }
       const k = key++
+      // A checklist (task items) renders as checkboxes, not disc bullets.
+      const tasks = rows.map((r) => TASK_ITEM_RE.exec(r))
+      if (tasks.some(Boolean)) {
+        blocks.push(
+          <ul key={k} className="flex flex-col gap-1">
+            {rows.map((r, j) => {
+              const m = tasks[j]
+              if (!m) return <li key={j} className="pl-6">{renderInline(r, `tl${k}-${j}`)}</li>
+              const checked = m[1] === 'x' || m[1] === 'X'
+              return (
+                <li key={j} className="flex items-start gap-2">
+                  <span
+                    className={`mt-0.5 flex size-4 shrink-0 items-center justify-center rounded border ${
+                      checked ? 'border-add bg-add/20 text-add' : 'border-line text-transparent'
+                    }`}
+                  >
+                    <Check className="size-3" />
+                  </span>
+                  <span className={checked ? 'text-muted line-through' : ''}>{renderInline(m[2] ?? '', `tl${k}-${j}`)}</span>
+                </li>
+              )
+            })}
+          </ul>,
+        )
+        continue
+      }
       blocks.push(
         <ul key={k} className="list-disc space-y-1 pl-5">
           {rows.map((r, j) => (

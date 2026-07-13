@@ -36,9 +36,20 @@ export type EventBody =
   | { type: 'user_prompt'; text: string; images?: ImageRef[] }
   /** A complete assistant message. Never a token delta — see DECISIONS #7. */
   | { type: 'assistant_text'; text: string }
-  | { type: 'tool_use'; toolUseId: string; name: string; input: unknown }
-  /** `summary` is one line, for a chip. Never a 40KB file read. */
-  | { type: 'tool_result'; toolUseId: string; ok: boolean; summary: string }
+  /**
+   * `parentToolUseId` is set when this call came from *inside* a sub-agent (the
+   * `Task` tool): it's the toolUseId of the launching `Task` call. Absent for the
+   * main agent's own calls. The reducer uses it to fold sub-agent activity into a
+   * distinct "Sub-agent" row instead of flattening it into the main thread.
+   */
+  | { type: 'tool_use'; toolUseId: string; name: string; input: unknown; parentToolUseId?: string }
+  /**
+   * `summary` is one line, for a chip. `output` is the fuller result body (capped
+   * + redacted), captured only for tools that render it — Bash (IN/OUT card), the
+   * Task* family (the task-list card), and Task (the sub-agent's final report).
+   * Everything else keeps just the summary. `parentToolUseId`: see tool_use.
+   */
+  | { type: 'tool_result'; toolUseId: string; ok: boolean; summary: string; output?: string; parentToolUseId?: string }
   | {
       type: 'approval_request'
       approvalId: string

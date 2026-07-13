@@ -108,6 +108,58 @@ const startedForThread = (log: EventLog, threadId: string): number =>
 
 // ---------------------------------------------------------------------------
 
+test('tool_result keeps full output for Bash, only a summary for a file read', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'mce-projects-'))
+  const dir = join(root, 'app')
+  mkdirSync(dir)
+  execFileSync('git', ['-C', dir, 'init', '-q', '-b', 'main'])
+  const config: Config = { ...BASE, projectsRoot: root, projectPath: dir, projectId: 'app' }
+
+  const log = new EventLog(openDb(':memory:'), makeRedactor([]))
+  const projects = new ProjectStore(root, log)
+  const uploads = new UploadStore(mkdtempSync(join(tmpdir(), 'mce-uploads-')))
+
+  // A fake SDK run: one assistant turn calling Bash + Read, then their results.
+  const queryFn = ((params: { prompt: AsyncIterable<{ message: { content: string } }> }) =>
+    (async function* () {
+      yield init('c1')
+      for await (const _msg of params.prompt) {
+        yield {
+          type: 'assistant',
+          message: {
+            content: [
+              { type: 'tool_use', id: 'b1', name: 'Bash', input: { command: 'ls' } },
+              { type: 'tool_use', id: 'r1', name: 'Read', input: { file_path: 'a.ts' } },
+            ],
+          },
+        } as unknown as SDKMessage
+        yield {
+          type: 'user',
+          message: {
+            content: [
+              { type: 'tool_result', tool_use_id: 'b1', is_error: false, content: 'line1\nline2' },
+              { type: 'tool_result', tool_use_id: 'r1', is_error: false, content: 'a whole file body' },
+            ],
+          },
+        } as unknown as SDKMessage
+        yield done()
+      }
+    })() as unknown as Query) as unknown as QueryFn
+
+  const manager = new SessionManager(log, config, projects, uploads, { queryFn, sessionExists: () => false })
+  const t = manager.newThread('app')
+  await manager.prompt('app', t, 'go')
+  await waitFor(() => log.replaySince(0).some((e) => e.type === 'turn_complete'), 'turn complete')
+
+  const results = log.replaySince(0).filter((e) => e.type === 'tool_result')
+  const outputOf = (id: string): string | undefined => {
+    const e = results.find((r) => (r as { toolUseId?: string }).toolUseId === id)
+    return e ? (e as { output?: string }).output : undefined
+  }
+  assert.equal(outputOf('b1'), 'line1\nline2', 'Bash keeps its full output, newlines intact')
+  assert.equal(outputOf('r1'), undefined, 'a file read keeps only the one-line summary')
+})
+
 test('newThread mints an id; the first prompt starts a fresh session (no resume, no recap)', async () => {
   const { manager, log, resumes, firstPrompts } = harness(['app'], ['c1'])
   const t = manager.newThread('app')
