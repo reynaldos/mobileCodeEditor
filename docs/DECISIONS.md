@@ -433,10 +433,12 @@ buy nothing. Vercel's real fit is the *far-future multi-tenant front door* — m
 billing — never the workspace containers. See [#19](#19-react--vite-not-nextjs).
 
 **One volume, everything under `/data`.** Fly Machines allow exactly one volume per machine.
-The event log, the cloned projects (`/data/projects`), and Tailscale state (`/data/tailscale`)
-all live under it. `PROJECT_PATH` became overridable to point there; the VM/local default of
-`/projects` still holds. An empty volume self-populates: the entrypoint clones `PROJECT_REPO`
-on first boot.
+The event log, the projects (`/data/projects`), and Tailscale state (`/data/tailscale`)
+all live under it. `PROJECTS_ROOT` points the server there; the VM/local default of
+`/projects` still holds. An empty volume just boots to an empty picker — projects are
+added through the app, not seeded. (An earlier `PROJECT_PATH=/data/projects/app` +
+`PROJECT_REPO` auto-clone re-created a project named "app" on every deploy, fighting
+anyone who deleted it, and was removed.)
 
 **Would change our mind:** going truly multi-tenant re-opens all of this — per-user Machines,
 a control plane in front, and the Tailscale-per-container model gives way to a real ingress.

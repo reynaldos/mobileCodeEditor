@@ -33,14 +33,20 @@ export function DiffView({ subject }: { subject: DiffSubject }): React.JSX.Eleme
 
       {/* Wide lines scroll inside the diff. The page never scrolls sideways. */}
       <pre className="scroll-cap m-0 overflow-x-auto font-mono text-xs leading-[1.55]">
-        {rows.map((row, index) => (
-          <div key={index} className={`flex min-w-max pr-3 ${ROW[row.kind]}`}>
-            <span className={`w-5 shrink-0 select-none text-center ${SIGIL_COLOR[row.kind]}`}>
-              {SIGIL[row.kind]}
-            </span>
-            <span className="whitespace-pre">{row.text || ' '}</span>
-          </div>
-        ))}
+        {/* One wrapper sized to the widest row (`w-max`), at least full width
+            (`min-w-full`), so every row can fill it — otherwise a short row's
+            highlight stops at the viewport edge and looks ragged when you scroll
+            right. Rows are `w-full` = the wrapper's full (scroll) width. */}
+        <div className="w-max min-w-full">
+          {rows.map((row, index) => (
+            <div key={index} className={`flex w-full pr-3 ${ROW[row.kind]}`}>
+              <span className={`w-5 shrink-0 select-none text-center ${SIGIL_COLOR[row.kind]}`}>
+                {SIGIL[row.kind]}
+              </span>
+              <span className="whitespace-pre">{row.text || ' '}</span>
+            </div>
+          ))}
+        </div>
       </pre>
     </div>
   )

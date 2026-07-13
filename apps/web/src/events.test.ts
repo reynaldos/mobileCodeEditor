@@ -61,6 +61,132 @@ test('tool_result finds its tool_use even with items appended in between', () =>
   assert.equal(items[2]?.kind === 'tool' && items[2].status, 'running')
 })
 
+test('TodoWrite is one live todo card that updates in place, without splitting the tool group', () => {
+  const state = run([
+    { type: 'user_prompt', text: 'do it' },
+    { type: 'tool_use', toolUseId: 'td1', name: 'TodoWrite', input: { todos: [{ content: 'step one', status: 'pending' }] } },
+    { type: 'tool_use', toolUseId: 't1', name: 'Bash', input: { command: 'ls' } },
+    { type: 'tool_use', toolUseId: 't2', name: 'Edit', input: { file_path: 'a.ts' } },
+    { type: 'tool_use', toolUseId: 'td2', name: 'TodoWrite', input: { todos: [{ content: 'step one', status: 'completed' }] } },
+  ])
+
+  // One todo item, not two — the second TodoWrite updated the first in place.
+  assert.deepEqual(kinds(state), ['user', 'todo', 'tool', 'tool'])
+  const todo = view(state).items[1]
+  assert.equal(todo?.kind === 'todo' && todo.todos[0]?.status, 'completed')
+
+  // The Bash+Edit run stays a single group — the pinned todo card sits before it.
+  const rows = groupTools(view(state).items, false)
+  assert.deepEqual(rows.map((r) => r.kind), ['user', 'todo', 'toolGroup'])
+  const group = rows[2]
+  assert.equal(group?.kind === 'toolGroup' && group.tools.length, 2)
+})
+
+test('a new user_prompt starts a fresh todo card', () => {
+  const state = run([
+    { type: 'user_prompt', text: 'first' },
+    { type: 'tool_use', toolUseId: 'td1', name: 'TodoWrite', input: { todos: [{ content: 'a', status: 'completed' }] } },
+    { type: 'user_prompt', text: 'second' },
+    { type: 'tool_use', toolUseId: 'td2', name: 'TodoWrite', input: { todos: [{ content: 'b', status: 'pending' }] } },
+  ])
+
+  assert.deepEqual(kinds(state), ['user', 'todo', 'user', 'todo'])
+  const first = view(state).items[1]
+  const second = view(state).items[3]
+  assert.equal(first?.kind === 'todo' && first.todos[0]?.content, 'a')
+  assert.equal(second?.kind === 'todo' && second.todos[0]?.content, 'b')
+})
+
+test('the Task* family folds into one task card (create + update), with no tool chips', () => {
+  const state = run([
+    { type: 'user_prompt', text: 'plan it' },
+    { type: 'tool_use', toolUseId: 'c1', name: 'TaskCreate', input: { subject: 'Do A', description: 'a' } },
+    { type: 'tool_result', toolUseId: 'c1', ok: true, summary: 'ok', output: '{"task":{"id":"t1","subject":"Do A"}}' },
+    { type: 'tool_use', toolUseId: 'c2', name: 'TaskCreate', input: { subject: 'Do B', description: 'b' } },
+    // Output wrapped in prose — exercises the tolerant JSON extractor.
+    { type: 'tool_result', toolUseId: 'c2', ok: true, summary: 'ok', output: 'Created. {"task":{"id":"t2","subject":"Do B"}}' },
+    { type: 'tool_use', toolUseId: 'u1', name: 'TaskUpdate', input: { taskId: 't1', status: 'completed' } },
+  ])
+
+  assert.deepEqual(kinds(state), ['user', 'todo'])
+  const card = view(state).items[1]
+  assert.deepEqual(card?.kind === 'todo' ? card.todos : [], [
+    { content: 'Do A', status: 'completed' },
+    { content: 'Do B', status: 'pending' },
+  ])
+})
+
+test('a TaskList result replaces the task projection (authoritative)', () => {
+  const state = run([
+    { type: 'user_prompt', text: 'plan it' },
+    { type: 'tool_use', toolUseId: 'c1', name: 'TaskCreate', input: { subject: 'Do A' } },
+    { type: 'tool_result', toolUseId: 'c1', ok: true, summary: 'ok', output: '{"task":{"id":"t1","subject":"Do A"}}' },
+    { type: 'tool_use', toolUseId: 'l1', name: 'TaskList', input: {} },
+    {
+      type: 'tool_result',
+      toolUseId: 'l1',
+      ok: true,
+      summary: 'ok',
+      output: '{"tasks":[{"id":"t1","subject":"Do A","status":"completed"},{"id":"t2","subject":"Do B","status":"in_progress"}]}',
+    },
+  ])
+
+  const card = view(state).items.find((i) => i.kind === 'todo')
+  assert.deepEqual(card?.kind === 'todo' ? card.todos : [], [
+    { content: 'Do A', status: 'completed' },
+    { content: 'Do B', status: 'in_progress' },
+  ])
+})
+
+test('a Task sub-agent gets its own row; its streamed tool calls fold in, not the main thread', () => {
+  const state = run([
+    { type: 'user_prompt', text: 'design it' },
+    { type: 'tool_use', toolUseId: 'T1', name: 'Task', input: { description: 'Design the schema', subagent_type: 'design' } },
+    // Tool calls the sub-agent streams back, tagged with the Task's id as parent.
+    { type: 'tool_use', toolUseId: 's1', name: 'Read', input: { file_path: 'a.ts' }, parentToolUseId: 'T1' },
+    { type: 'tool_result', toolUseId: 's1', ok: true, summary: 'read', parentToolUseId: 'T1' },
+    { type: 'tool_use', toolUseId: 's2', name: 'Grep', input: { pattern: 'x' }, parentToolUseId: 'T1' },
+    // The main agent's own tool, interleaved — stays top-level.
+    { type: 'tool_use', toolUseId: 'm1', name: 'Bash', input: { command: 'ls' } },
+    { type: 'tool_result', toolUseId: 's2', ok: false, summary: 'no match', parentToolUseId: 'T1' },
+    // The Task's own result closes the row and carries the report.
+    { type: 'tool_result', toolUseId: 'T1', ok: true, summary: 'done', output: '# Findings\nUse one table.' },
+  ])
+
+  // One subagent row + the main agent's own Bash — the sub-agent's Read/Grep are NOT top-level.
+  assert.deepEqual(kinds(state), ['user', 'subagent', 'tool'])
+
+  const sub = view(state).items[1]
+  assert.ok(sub?.kind === 'subagent')
+  if (sub?.kind !== 'subagent') return
+  assert.equal(sub.status, 'ok')
+  assert.equal(sub.subagentType, 'design')
+  assert.equal(sub.report, '# Findings\nUse one table.')
+  // Both children folded in, patched to their result statuses.
+  assert.deepEqual(sub.tools.map((t) => [t.name, t.status]), [
+    ['Read', 'ok'],
+    ['Grep', 'error'],
+  ])
+
+  // The interleaved main-agent Bash is the top-level tool, untouched by the fold.
+  const bash = view(state).items[2]
+  assert.equal(bash?.kind === 'tool' && bash.name, 'Bash')
+})
+
+test('a running sub-agent breaks the surrounding tool group into its own row', () => {
+  const state = run([
+    { type: 'tool_use', toolUseId: 'm1', name: 'Read', input: { file_path: 'a.ts' } },
+    { type: 'tool_use', toolUseId: 'T1', name: 'Task', input: { description: 'go', subagent_type: 'general' } },
+    { type: 'tool_use', toolUseId: 'm2', name: 'Bash', input: { command: 'ls' } },
+  ])
+
+  // Read | Sub-agent | Bash — the Task splits the two plain tools into separate groups.
+  const rows = groupTools(view(state).items, true)
+  assert.deepEqual(rows.map((r) => r.kind), ['toolGroup', 'subagent', 'toolGroup'])
+  const sub = rows[1]
+  assert.equal(sub?.kind === 'subagent' && sub.status, 'running')
+})
+
 test('approval flows pending -> allowed and releases the agent', () => {
   const state = run([
     { type: 'approval_request', approvalId: 'a1', toolUseId: 't1', tool: 'Edit', input: {} },

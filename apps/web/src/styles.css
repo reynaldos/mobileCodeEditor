@@ -111,6 +111,26 @@ body {
   animation: pulse 1s infinite;
 }
 
+/* The initial-fetch dots — grow 0 -> 4 then reset, so a wait reads as alive. */
+@keyframes dots {
+  0% {
+    content: '.';
+  }
+  40% {
+    content: '..';
+  }
+  60% {
+    content: '...';
+  }
+  80% {
+    content: '....';
+  }
+}
+.animate-dots::after {
+  content: '';
+  animation: dots 1.5s step-end infinite;
+}
+
 /* An honest "it's working" bar for the build modal — no percentage to fake. */
 @keyframes indeterminate {
   0% {

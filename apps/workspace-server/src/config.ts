@@ -12,10 +12,14 @@ export interface Config {
   readonly port: number
   readonly host: string
   readonly dbPath: string
-  /** The seed project, cloned on first boot. Still the default when no other exists. */
-  readonly projectPath: string
-  readonly projectId: string
-  /** Parent of the projects (Phase 2). Every project is a directory under here. */
+  /**
+   * Legacy single-project pin (Phase 0). Optional: with the multi-repo picker,
+   * `projectsRoot` is the source of truth and nothing pins one project. Local/VM
+   * runs may still set PROJECT_PATH, in which case the root is its parent.
+   */
+  readonly projectPath?: string
+  readonly projectId?: string
+  /** Parent of the projects (Phase 2). Every directory under here is a project. */
   readonly projectsRoot: string
   /** Uploaded image files, under the same persistent volume as dbPath/projectsRoot. */
   readonly uploadsRoot: string
@@ -47,30 +51,40 @@ export interface VapidConfig {
 
 class ConfigError extends Error {}
 
-function required(name: string): string {
-  const v = process.env[name]?.trim()
-  if (!v) throw new ConfigError(`${name} is not set. Copy .env.example to .env and fill it in.`)
-  return v
-}
-
 export function loadConfig(): Config {
-  const projectPath = resolve(required('PROJECT_PATH'))
-
-  let stat
-  try {
-    stat = statSync(projectPath)
-  } catch {
-    throw new ConfigError(`PROJECT_PATH does not exist: ${projectPath}`)
+  // What projects exist is read straight off the filesystem — every directory
+  // under the projects root is a project, and the in-app picker creates them.
+  // PROJECTS_ROOT names that root directly. PROJECT_PATH is the legacy Phase-0
+  // single-project pin: still honored (local/VM runs set it), and there the root
+  // is simply its parent. One of the two must be set.
+  const projectPathEnv = process.env.PROJECT_PATH?.trim()
+  const projectsRootEnv = process.env.PROJECTS_ROOT?.trim()
+  if (!projectsRootEnv && !projectPathEnv) {
+    throw new ConfigError('Set PROJECTS_ROOT (or PROJECT_PATH). Copy .env.example to .env and fill it in.')
   }
-  if (!stat.isDirectory()) throw new ConfigError(`PROJECT_PATH is not a directory: ${projectPath}`)
+
+  // A pinned PROJECT_PATH must be a real directory — a typo'd host path or a repo
+  // that never cloned is a misconfigured run, not a legitimately empty picker.
+  let projectPath: string | undefined
+  if (projectPathEnv) {
+    projectPath = resolve(projectPathEnv)
+    let stat
+    try {
+      stat = statSync(projectPath)
+    } catch {
+      throw new ConfigError(`PROJECT_PATH does not exist: ${projectPath}`)
+    }
+    if (!stat.isDirectory()) throw new ConfigError(`PROJECT_PATH is not a directory: ${projectPath}`)
+  }
+
+  const projectsRoot = resolve(projectsRootEnv ?? dirname(projectPath!))
 
   return {
     port: Number(process.env.PORT ?? 3000),
     host: process.env.HOST ?? '127.0.0.1',
     dbPath: resolve(process.env.DB_PATH ?? './data/events.db'),
-    projectPath,
-    projectId: basename(projectPath),
-    projectsRoot: resolve(process.env.PROJECTS_ROOT ?? dirname(projectPath)),
+    ...(projectPath ? { projectPath, projectId: basename(projectPath) } : {}),
+    projectsRoot,
     uploadsRoot: resolve(process.env.UPLOADS_ROOT ?? './data/uploads'),
     // Deliberately not required at boot. You can build and verify the whole SSE
     // and replay path before the agent exists — that's the Block 2 gate.
