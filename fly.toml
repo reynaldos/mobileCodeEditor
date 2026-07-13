@@ -21,11 +21,13 @@ primary_region = "iad"   # Ashburn, US East. Pick the region nearest you.
   # Git identity is derived from the GH_TOKEN account by the entrypoint (login +
   # GitHub noreply email), so commits attribute to the real user. Set
   # GIT_AUTHOR_NAME / GIT_AUTHOR_EMAIL here only to override that.
-  # An empty projects dir self-populates from this on first boot.
-  PROJECT_REPO = "https://github.com/reynaldos/fitnessTracker.git"
-  # Fly Machines allow ONE volume, so everything lives under /data — the log, the
-  # projects, and Tailscale state. This override points the project there.
-  PROJECT_PATH = "/data/projects/app"
+  #
+  # Multi-repo: the in-app picker owns project creation, so the server is pointed
+  # at the projects *root*, not a single seeded project. Fly Machines allow ONE
+  # volume, so this lives under /data alongside the log and Tailscale state. (The
+  # old PROJECT_PATH=/data/projects/app + PROJECT_REPO auto-clone are gone — they
+  # re-created a project named "app" on every deploy.)
+  PROJECTS_ROOT = "/data/projects"
   # The machine's name on your tailnet → https://mce.<tailnet>.ts.net
   TS_HOSTNAME = "mce"
 

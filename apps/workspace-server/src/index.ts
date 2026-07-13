@@ -70,7 +70,7 @@ const app = await buildServer(config, {
 await app.listen({ port: config.port, host: config.host })
 app.log.info(
   {
-    project: config.projectPath,
+    projectsRoot: config.projectsRoot,
     lastSeq: log.lastSeq(),
     agentReady: Boolean(config.claudeToken),
     pushReady: pusher.enabled,

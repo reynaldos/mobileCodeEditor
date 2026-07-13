@@ -23,7 +23,7 @@ export function registerDebug(app: FastifyInstance, log: EventLog, config: Confi
 
     const event = log.append({
       sessionId: body.sessionId ?? 'debug',
-      projectId: config.projectId,
+      projectId: config.projectId ?? 'debug',
       ts: Date.now(),
       ...body,
     })

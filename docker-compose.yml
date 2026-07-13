@@ -25,7 +25,10 @@ services:
       # Mode 0600 on the host. Holds CLAUDE_CODE_OAUTH_TOKEN and GH_TOKEN.
       - ./config:/config:ro
     environment:
-      PROJECT_PATH: /projects/app
+      # The bind-mounted projects root; every directory under it is a project and
+      # the in-app picker creates them. (Was PROJECT_PATH=/projects/app, a single
+      # pinned project — replaced by the multi-repo picker.)
+      PROJECTS_ROOT: /projects
       # Non-secret commit identity, interpolated from the gitignored root .env so
       # this file stays generic. A per-tenant control plane would inject these the
       # same way, per user, from their GitHub profile. See DECISIONS #13.

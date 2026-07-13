@@ -20,11 +20,16 @@ export PORT="${PORT:-3000}"
 export DB_PATH=/data/events.db
 export UPLOADS_ROOT=/data/uploads
 export WEB_DIST=/app/apps/web/dist
-# PROJECT_PATH is overridable, unlike the fixed paths above. Fly Machines allow
-# only one volume, so on Fly everything (log, projects, tailscale state) lives
-# under the single /data mount and fly.toml sets PROJECT_PATH=/data/projects/app.
-# On the VM/local it's a separate /projects mount, so the default holds.
-export PROJECT_PATH="${PROJECT_PATH:-/projects/app}"
+# Projects live under a root, not a single pinned path: the in-app picker owns
+# creation and every directory under the root is a project. PROJECTS_ROOT is
+# overridable, unlike the fixed paths above — on Fly everything (log, projects,
+# tailscale state) shares the single /data mount (fly.toml sets
+# PROJECTS_ROOT=/data/projects); on the VM/local it's the /projects bind mount,
+# so the default holds. Unset any legacy PROJECT_PATH a dev /config/.env may
+# carry — a host path that doesn't exist in here would fail config's boot check.
+unset PROJECT_PATH
+export PROJECTS_ROOT="${PROJECTS_ROOT:-/projects}"
+mkdir -p "$PROJECTS_ROOT"
 
 # The repos in /projects are bind-mounted from the host and were created by a
 # different uid, so git refuses them as "dubious ownership". Inside a disposable
@@ -64,20 +69,9 @@ if [ -n "${GH_TOKEN:-}" ]; then
   gh auth setup-git >/dev/null 2>&1 || echo "warning: gh auth setup-git failed" >&2
 fi
 
-# On a fresh volume (Fly's first boot) /projects/app doesn't exist yet. If a
-# PROJECT_REPO is configured, clone it. On the VM/local the repo is already there
-# and PROJECT_REPO is unset, so this is a no-op.
-if [ ! -d "$PROJECT_PATH" ] && [ -n "${PROJECT_REPO:-}" ]; then
-  echo "cloning $PROJECT_REPO into $PROJECT_PATH ..." >&2
-  mkdir -p "$(dirname "$PROJECT_PATH")"
-  git clone "$PROJECT_REPO" "$PROJECT_PATH" || echo "warning: clone failed" >&2
-fi
-
-if [ ! -d "$PROJECT_PATH" ]; then
-  echo "PROJECT_PATH $PROJECT_PATH does not exist inside the container." >&2
-  echo "Set PROJECT_REPO to auto-clone it, or mount a repo at /projects/app." >&2
-  exit 1
-fi
+# A fresh volume just boots to an empty projects root — the picker fills it. No
+# seed clone: it used to re-create a project named "app" on every deploy, which
+# fought anyone who deleted it. Add projects through the app instead.
 
 # Tailscale, in-container. For hosts with no separate machine to run it on (Fly),
 # where the container IS the unit. Userspace networking — no /dev/net/tun, no

@@ -69,7 +69,7 @@ function makeSession(queryFn: QueryFn): { session: AgentSession; log: EventLog; 
     config: CONFIG,
     projectId: 'test',
     threadId: 'th1',
-    projectPath: CONFIG.projectPath,
+    projectPath: CONFIG.projectPath!, // the fixture sets it (line ~25); a session always has a concrete path
     uploads,
     queryFn,
   })
