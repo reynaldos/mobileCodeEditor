@@ -91,6 +91,24 @@ export function PreviewDrawer({ preview, projects }: Props): React.JSX.Element {
     return () => window.removeEventListener('message', onMessage)
   }, [])
 
+  // Vaul locks `document.body { pointer-events: none }` while the drawer sits at
+  // its full snap (so the raised preview reads as modal) and does NOT lift it when
+  // you lower to the peek strip — which leaves the whole thread behind unclickable
+  // until you fully close. While peeked, force the body interactive; re-assert via
+  // an observer because Vaul rewrites the body style on every snap/drag. When
+  // raised the drawer covers the screen, so the lock is correct and left alone.
+  useEffect(() => {
+    if (projectId === null || raised) return
+    const body = document.body
+    const unlock = (): void => {
+      if (body.style.pointerEvents === 'none') body.style.pointerEvents = 'auto'
+    }
+    unlock()
+    const observer = new MutationObserver(unlock)
+    observer.observe(body, { attributes: true, attributeFilter: ['style'] })
+    return () => observer.disconnect()
+  }, [projectId, raised])
+
   // Reload the current page in the iframe (same-origin, so this just works).
   // Drop `iframeLoaded` so the spinner covers the reload instead of flashing white.
   const refresh = useCallback(() => {
