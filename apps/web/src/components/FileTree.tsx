@@ -1,6 +1,7 @@
 import type { FsEntry, FsSearchMatch } from '@mce/protocol'
 import {
   ChevronRight,
+  Eye,
   File,
   FileCode,
   FileJson,
@@ -15,10 +16,13 @@ import {
 import { useEffect, useState } from 'react'
 import { fetchFileTree, searchProjectFiles } from '../api.ts'
 import { useDebounced } from '../useDebounced.ts'
+import { ActionsMenu } from './ActionsMenu.tsx'
 
 interface Props {
   projectId: string
   onOpenFile: (path: string) => void
+  /** Open the compiled markdown preview for a `.md`/`.mdx` file (the per-row kebab action). */
+  onPreview: (path: string) => void
 }
 
 /**
@@ -28,7 +32,7 @@ interface Props {
  * same "browse when empty, search when typing" shape `ProjectPicker`'s repo
  * search already uses.
  */
-export function FileTree({ projectId, onOpenFile }: Props): React.JSX.Element {
+export function FileTree({ projectId, onOpenFile, onPreview }: Props): React.JSX.Element {
   const [query, setQuery] = useState('')
   const debounced = useDebounced(query, 300)
   const [results, setResults] = useState<FsSearchMatch[]>([])
@@ -85,9 +89,15 @@ export function FileTree({ projectId, onOpenFile }: Props): React.JSX.Element {
 
       <div className="min-h-0 flex-1 overflow-y-auto px-1.5 py-2">
         {query.trim() ? (
-          <SearchResults results={results} truncated={truncated} searching={searching} onOpenFile={onOpenFile} />
+          <SearchResults
+            results={results}
+            truncated={truncated}
+            searching={searching}
+            onOpenFile={onOpenFile}
+            onPreview={onPreview}
+          />
         ) : (
-          <RootTree projectId={projectId} onOpenFile={onOpenFile} />
+          <RootTree projectId={projectId} onOpenFile={onOpenFile} onPreview={onPreview} />
         )}
       </div>
     </div>
@@ -99,11 +109,13 @@ function SearchResults({
   truncated,
   searching,
   onOpenFile,
+  onPreview,
 }: {
   results: FsSearchMatch[]
   truncated: boolean
   searching: boolean
   onOpenFile: (path: string) => void
+  onPreview: (path: string) => void
 }): React.JSX.Element {
   if (searching && results.length === 0) {
     return <p className="px-2.5 py-8 text-center text-[13px] text-muted">Searching…</p>
@@ -114,9 +126,9 @@ function SearchResults({
   return (
     <ul className="flex flex-col gap-0.5">
       {results.map((m, i) => (
-        <li key={`${m.path}:${m.line}:${i}`}>
+        <li key={`${m.path}:${m.line}:${i}`} className="flex items-center rounded-lg hover:bg-panel-2">
           <button
-            className="flex w-full flex-col items-start gap-0.5 rounded-lg px-2.5 py-2 text-left hover:bg-panel-2"
+            className="flex min-w-0 flex-1 flex-col items-start gap-0.5 px-2.5 py-2 text-left"
             onClick={() => onOpenFile(m.path)}
           >
             <span className="flex w-full items-center gap-1.5 text-[12px] text-muted">
@@ -126,6 +138,7 @@ function SearchResults({
             </span>
             <span className="w-full truncate font-mono text-[12px] text-fg">{m.text}</span>
           </button>
+          {isMarkdown(m.path) && <PreviewMenu onPreview={() => onPreview(m.path)} />}
         </li>
       ))}
       {truncated && (
@@ -135,7 +148,15 @@ function SearchResults({
   )
 }
 
-function RootTree({ projectId, onOpenFile }: { projectId: string; onOpenFile: (path: string) => void }): React.JSX.Element {
+function RootTree({
+  projectId,
+  onOpenFile,
+  onPreview,
+}: {
+  projectId: string
+  onOpenFile: (path: string) => void
+  onPreview: (path: string) => void
+}): React.JSX.Element {
   const [entries, setEntries] = useState<FsEntry[] | null>(null)
   const [error, setError] = useState(false)
 
@@ -158,7 +179,7 @@ function RootTree({ projectId, onOpenFile }: { projectId: string; onOpenFile: (p
   return (
     <ul className="flex flex-col gap-0.5">
       {entries.map((e) => (
-        <TreeNode key={e.path} projectId={projectId} entry={e} depth={0} onOpenFile={onOpenFile} />
+        <TreeNode key={e.path} projectId={projectId} entry={e} depth={0} onOpenFile={onOpenFile} onPreview={onPreview} />
       ))}
     </ul>
   )
@@ -174,11 +195,13 @@ function TreeNode({
   entry,
   depth,
   onOpenFile,
+  onPreview,
 }: {
   projectId: string
   entry: FsEntry
   depth: number
   onOpenFile: (path: string) => void
+  onPreview: (path: string) => void
 }): React.JSX.Element {
   const [open, setOpen] = useState(false)
   const [children, setChildren] = useState<FsEntry[] | null>(null)
@@ -205,24 +228,27 @@ function TreeNode({
 
   return (
     <li>
-      <button
-        className="flex w-full items-center gap-1.5 rounded-lg py-1.5 pr-2.5 text-left hover:bg-panel-2"
-        style={{ paddingLeft: indent }}
-        onClick={toggle}
-      >
-        {entry.type === 'dir' ? (
-          <>
-            <ChevronRight className={`size-3.5 shrink-0 text-muted transition-transform ${open ? 'rotate-90' : ''}`} />
-            {open ? <FolderOpen className="size-4 shrink-0 text-accent" /> : <Folder className="size-4 shrink-0 text-accent" />}
-          </>
-        ) : (
-          <>
-            <span className="size-3.5 shrink-0" />
-            <FileIcon name={entry.name} className="size-4 shrink-0" />
-          </>
-        )}
-        <span className="truncate text-[14px] text-fg">{entry.name}</span>
-      </button>
+      <div className="flex items-center rounded-lg hover:bg-panel-2">
+        <button
+          className="flex min-w-0 flex-1 items-center gap-1.5 py-1.5 pr-2 text-left"
+          style={{ paddingLeft: indent }}
+          onClick={toggle}
+        >
+          {entry.type === 'dir' ? (
+            <>
+              <ChevronRight className={`size-3.5 shrink-0 text-muted transition-transform ${open ? 'rotate-90' : ''}`} />
+              {open ? <FolderOpen className="size-4 shrink-0 text-accent" /> : <Folder className="size-4 shrink-0 text-accent" />}
+            </>
+          ) : (
+            <>
+              <span className="size-3.5 shrink-0" />
+              <FileIcon name={entry.name} className="size-4 shrink-0" />
+            </>
+          )}
+          <span className="truncate text-[14px] text-fg">{entry.name}</span>
+        </button>
+        {entry.type === 'file' && isMarkdown(entry.name) && <PreviewMenu onPreview={() => onPreview(entry.path)} />}
+      </div>
 
       {entry.type === 'dir' && open && (
         <ul className="flex flex-col gap-0.5">
@@ -238,11 +264,27 @@ function TreeNode({
           )}
           {!loading &&
             children?.map((c) => (
-              <TreeNode key={c.path} projectId={projectId} entry={c} depth={depth + 1} onOpenFile={onOpenFile} />
+              <TreeNode
+                key={c.path}
+                projectId={projectId}
+                entry={c}
+                depth={depth + 1}
+                onOpenFile={onOpenFile}
+                onPreview={onPreview}
+              />
             ))}
         </ul>
       )}
     </li>
+  )
+}
+
+/** The per-row markdown kebab: a single "Open preview" action, reusing the app's `ActionsMenu` (tap + hover, touch-first). */
+function PreviewMenu({ onPreview }: { onPreview: () => void }): React.JSX.Element {
+  return (
+    <div className="shrink-0 pr-1.5">
+      <ActionsMenu actions={[{ key: 'preview', label: 'Open preview', icon: Eye, onClick: onPreview }]} />
+    </div>
   )
 }
 
@@ -266,6 +308,11 @@ const CODE_EXT = new Set([
 const JSON_EXT = new Set(['json', 'jsonc'])
 const MARKDOWN_EXT = new Set(['md', 'mdx'])
 const IMAGE_EXT = new Set(['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'ico', 'bmp'])
+
+/** Whether a name/path is a markdown file — gates the per-row "Open preview" kebab. */
+function isMarkdown(name: string): boolean {
+  return MARKDOWN_EXT.has(name.split('.').pop()?.toLowerCase() ?? '')
+}
 
 function FileIcon({ name, className }: { name: string; className: string }): React.JSX.Element {
   const ext = name.split('.').pop()?.toLowerCase() ?? ''

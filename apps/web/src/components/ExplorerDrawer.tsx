@@ -1,7 +1,7 @@
 import { ChevronLeft, Files, GitBranch, RotateCw, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { ActionsMenu } from './ActionsMenu.tsx'
-import { FileEditor, useOpenFiles } from './FileEditor.tsx'
+import { FileEditor, tabLabel, useOpenFiles } from './FileEditor.tsx'
 import { FileTree } from './FileTree.tsx'
 import { SourceControlView } from './SourceControlView.tsx'
 import { Drawer, DrawerContent } from './ui/drawer.tsx'
@@ -34,6 +34,10 @@ export function ExplorerDrawer({ projectId, projectName, initialView, open, onOp
   const [refreshKey, setRefreshKey] = useState(0)
   const tabs = useOpenFiles()
 
+  // The file view (source tabs and markdown-preview tabs alike) takes over the
+  // drawer body: a back arrow instead of X, and no Files/Source-control tabs.
+  const focused = view === 'file'
+
   // Reopening lands on whichever view was requested (see PHASE-3.md's
   // acceptance test) — open tabs themselves persist across a close/reopen of
   // the same project.
@@ -41,12 +45,20 @@ export function ExplorerDrawer({ projectId, projectName, initialView, open, onOp
     if (open) setView(initialView)
   }, [open, initialView])
 
-  const activeFileName = tabs.active?.split('/').pop()
+  // Header title mirrors the active tab — `name` for a source tab, `(Preview) name` for a preview tab.
+  const activeTabLabel = tabs.active ? tabLabel(tabs.active) : undefined
 
   function openFile(path: string): void {
     tabs.open(path)
     setView('file')
   }
+
+  function openPreview(path: string): void {
+    tabs.openPreview(path)
+    setView('file')
+  }
+
+  const title = focused ? (activeTabLabel ?? projectName) : projectName
 
   return (
     <Drawer open={open} onOpenChange={onOpenChange}>
@@ -54,20 +66,18 @@ export function ExplorerDrawer({ projectId, projectName, initialView, open, onOp
         <div className="flex shrink-0 items-center justify-between gap-2 border-b border-line px-3 pb-3">
           <button
             className="flex size-9 shrink-0 items-center justify-center rounded-lg text-muted hover:bg-panel-2"
-            aria-label={view === 'file' ? 'Back to files' : 'Close'}
-            onClick={view === 'file' ? () => setView('tree') : () => onOpenChange(false)}
+            aria-label={focused ? 'Back to files' : 'Close'}
+            onClick={focused ? () => setView('tree') : () => onOpenChange(false)}
           >
-            {view === 'file' ? <ChevronLeft className="size-5" /> : <X className="size-5" />}
+            {focused ? <ChevronLeft className="size-5" /> : <X className="size-5" />}
           </button>
-          <span className="min-w-0 flex-1 truncate text-center text-[15px] font-semibold text-fg">
-            {view === 'file' ? (activeFileName ?? projectName) : projectName}
-          </span>
+          <span className="min-w-0 flex-1 truncate text-center text-[15px] font-semibold text-fg">{title}</span>
           <ActionsMenu
             actions={[{ key: 'refresh', label: 'Refresh', icon: RotateCw, onClick: () => setRefreshKey((k) => k + 1) }]}
           />
         </div>
 
-        {view !== 'file' && (
+        {!focused && (
           <div className="flex shrink-0 gap-1 border-b border-line px-2 py-1.5">
             <ViewTab label="Files" icon={Files} active={view === 'tree'} onClick={() => setView('tree')} />
             <ViewTab
@@ -80,7 +90,9 @@ export function ExplorerDrawer({ projectId, projectName, initialView, open, onOp
         )}
 
         <div className="flex min-h-0 flex-1 flex-col">
-          {view === 'tree' && <FileTree key={`tree-${refreshKey}`} projectId={projectId} onOpenFile={openFile} />}
+          {view === 'tree' && (
+            <FileTree key={`tree-${refreshKey}`} projectId={projectId} onOpenFile={openFile} onPreview={openPreview} />
+          )}
           {view === 'source-control' && <SourceControlView key={`sc-${refreshKey}`} projectId={projectId} />}
           <FileEditor projectId={projectId} tabs={tabs} hidden={view !== 'file'} />
         </div>

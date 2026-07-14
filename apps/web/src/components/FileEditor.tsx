@@ -6,8 +6,34 @@ import { json } from '@codemirror/lang-json'
 import { markdown } from '@codemirror/lang-markdown'
 import type { Extension } from '@codemirror/state'
 import { Loader, X } from 'lucide-react'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import { fetchFileContent } from '../api.ts'
+
+// The markdown preview pulls in the react-markdown + remark/rehype stack; keep
+// it code-split so a source-only session never loads it.
+const MarkdownPreview = lazy(() => import('./MarkdownPreview.tsx').then((m) => ({ default: m.MarkdownPreview })))
+
+// A rendered markdown preview rides in the same tab strip as source files, but
+// as its own tab keyed `preview:<path>` — so a file's source and its preview can
+// be open side by side without colliding. These helpers are the one place that
+// scheme is encoded/decoded.
+const PREVIEW_PREFIX = 'preview:'
+export function previewTabId(path: string): string {
+  return PREVIEW_PREFIX + path
+}
+export function isPreviewTab(id: string): boolean {
+  return id.startsWith(PREVIEW_PREFIX)
+}
+/** The real file path behind a tab id (identity for a source tab, prefix-stripped for a preview tab). */
+export function tabFilePath(id: string): string {
+  return isPreviewTab(id) ? id.slice(PREVIEW_PREFIX.length) : id
+}
+/** Tab-strip / header label: bare file name for a source tab, `(Preview) name` for a preview tab. */
+export function tabLabel(id: string): string {
+  const path = tabFilePath(id)
+  const name = path.split('/').pop() ?? path
+  return isPreviewTab(id) ? `(Preview) ${name}` : name
+}
 
 /** Open-tab cap (PHASE-3.md design call 6). A hidden-but-mounted CodeMirror instance still costs real memory on a phone, so this can't be unbounded. */
 const MAX_TABS = 8
@@ -18,6 +44,8 @@ export interface OpenFilesState {
   active: string | null
   /** Open a file: adds a tab if new (evicting the least-recently-viewed tab past the cap) and makes it active. */
   open: (path: string) => void
+  /** Open a file's rendered markdown preview as its own `(Preview)` tab. */
+  openPreview: (path: string) => void
   /** Switch to an already-open tab. */
   select: (path: string) => void
   close: (path: string) => void
@@ -69,6 +97,8 @@ export function useOpenFiles(): OpenFilesState {
     [touch, leastRecentlyViewed],
   )
 
+  const openPreview = useCallback((path: string) => open(previewTabId(path)), [open])
+
   const select = useCallback(
     (path: string) => {
       touch(path)
@@ -91,7 +121,7 @@ export function useOpenFiles(): OpenFilesState {
     })
   }, [])
 
-  return { order, active, open, select, close }
+  return { order, active, open, openPreview, select, close }
 }
 
 interface FileState {
@@ -115,10 +145,11 @@ interface Props {
 export function FileEditor({ projectId, tabs, hidden }: Props): React.JSX.Element {
   const [cache, setCache] = useState<Map<string, FileState>>(new Map())
 
-  // Fetch content for any newly-opened tab, once.
+  // Fetch content for any newly-opened tab, once. Preview tabs render markdown
+  // via their own component, which fetches independently — skip them here.
   useEffect(() => {
     for (const path of tabs.order) {
-      if (cache.has(path)) continue
+      if (isPreviewTab(path) || cache.has(path)) continue
       setCache((prev) => new Map(prev).set(path, { content: null, error: null }))
       void fetchFileContent(projectId, path)
         .then((r) => setCache((prev) => new Map(prev).set(path, { content: r.content, error: null })))
@@ -145,15 +176,21 @@ export function FileEditor({ projectId, tabs, hidden }: Props): React.JSX.Elemen
   return (
     <div className={hidden ? 'hidden' : 'flex min-h-0 flex-1 flex-col'}>
       <div className="scroll-cap flex shrink-0 items-stretch gap-px overflow-x-auto border-b border-line bg-panel-2">
-        {tabs.order.map((path) => (
-          <Tab key={path} path={path} active={path === tabs.active} onSelect={() => tabs.select(path)} onClose={() => tabs.close(path)} />
+        {tabs.order.map((id) => (
+          <Tab key={id} id={id} active={id === tabs.active} onSelect={() => tabs.select(id)} onClose={() => tabs.close(id)} />
         ))}
       </div>
 
       <div className="min-h-0 flex-1">
-        {tabs.order.map((path) => (
-          <div key={path} className={path === tabs.active ? 'h-full' : 'hidden'}>
-            <FileContent state={cache.get(path)} path={path} />
+        {tabs.order.map((id) => (
+          <div key={id} className={id === tabs.active ? 'h-full' : 'hidden'}>
+            {isPreviewTab(id) ? (
+              <Suspense fallback={<Loading />}>
+                <MarkdownPreview projectId={projectId} path={tabFilePath(id)} />
+              </Suspense>
+            ) : (
+              <FileContent state={cache.get(id)} path={id} />
+            )}
           </div>
         ))}
       </div>
@@ -162,16 +199,17 @@ export function FileEditor({ projectId, tabs, hidden }: Props): React.JSX.Elemen
 }
 
 function Tab({
-  path,
+  id,
   active,
   onSelect,
   onClose,
 }: {
-  path: string
+  id: string
   active: boolean
   onSelect: () => void
   onClose: () => void
 }): React.JSX.Element {
+  const path = tabFilePath(id)
   const name = path.split('/').pop() ?? path
   return (
     <div
@@ -179,8 +217,8 @@ function Tab({
         active ? 'bg-panel text-fg' : 'text-muted'
       }`}
     >
-      <button className="max-w-32 truncate" title={path} onClick={onSelect}>
-        {name}
+      <button className="max-w-40 truncate" title={path} onClick={onSelect}>
+        {tabLabel(id)}
       </button>
       <button
         className="flex size-4 shrink-0 items-center justify-center rounded text-muted hover:bg-line hover:text-fg"
@@ -189,6 +227,16 @@ function Tab({
       >
         <X className="size-3" />
       </button>
+    </div>
+  )
+}
+
+/** Shared centered spinner — the preview chunk's Suspense fallback and any load-in-progress state. */
+function Loading(): React.JSX.Element {
+  return (
+    <div className="flex h-full items-center justify-center gap-2 text-muted">
+      <Loader className="size-4 animate-spin" />
+      <span className="text-[13px]">Loading…</span>
     </div>
   )
 }
