@@ -1,6 +1,7 @@
 import type { FsEntry, FsSearchMatch } from '@mce/protocol'
 import {
   ChevronRight,
+  ClipboardCopy,
   Eye,
   File,
   FileCode,
@@ -16,13 +17,31 @@ import {
 import { useEffect, useState } from 'react'
 import { fetchFileTree, searchProjectFiles } from '../api.ts'
 import { useDebounced } from '../useDebounced.ts'
-import { ActionsMenu } from './ActionsMenu.tsx'
+import { RowMenu, type RowMenuAction } from './RowMenu.tsx'
 
 interface Props {
   projectId: string
   onOpenFile: (path: string) => void
   /** Open the compiled markdown preview for a `.md`/`.mdx` file (the per-row kebab action). */
   onPreview: (path: string) => void
+}
+
+/**
+ * Copies the path as an `@`-reference (e.g. `@src/app/layout.tsx`) — the "Copy
+ * path" action every file row's kebab carries. Copying the `@` form means a
+ * paste straight into the prompt box is recognized as a file reference (see
+ * `HighlightedInput`) with no need to type the `@` first.
+ */
+function copyPath(path: string): void {
+  void navigator.clipboard?.writeText(`@${path}`).catch(() => {})
+}
+
+/** The per-file kebab actions: every file can copy its path; markdown files also get a rendered preview. */
+function fileMenuActions(path: string, onPreview: (path: string) => void): RowMenuAction[] {
+  const actions: RowMenuAction[] = []
+  if (isMarkdown(path)) actions.push({ key: 'preview', label: 'Open preview', icon: Eye, onClick: () => onPreview(path) })
+  actions.push({ key: 'copy', label: 'Copy path', icon: ClipboardCopy, onClick: () => copyPath(path) })
+  return actions
 }
 
 /**
@@ -126,7 +145,7 @@ function SearchResults({
   return (
     <ul className="flex flex-col gap-0.5">
       {results.map((m, i) => (
-        <li key={`${m.path}:${m.line}:${i}`} className="flex items-center rounded-lg hover:bg-panel-2">
+        <li key={`${m.path}:${m.line}:${i}`} className="group flex items-center rounded-lg hover:bg-panel-2">
           <button
             className="flex min-w-0 flex-1 flex-col items-start gap-0.5 px-2.5 py-2 text-left"
             onClick={() => onOpenFile(m.path)}
@@ -138,7 +157,9 @@ function SearchResults({
             </span>
             <span className="w-full truncate font-mono text-[12px] text-fg">{m.text}</span>
           </button>
-          {isMarkdown(m.path) && <PreviewMenu onPreview={() => onPreview(m.path)} />}
+          <span className="shrink-0 pr-1.5">
+            <RowMenu label={`Actions for ${m.path}`} actions={fileMenuActions(m.path, onPreview)} />
+          </span>
         </li>
       ))}
       {truncated && (
@@ -228,7 +249,7 @@ function TreeNode({
 
   return (
     <li>
-      <div className="flex items-center rounded-lg hover:bg-panel-2">
+      <div className="group flex items-center rounded-lg hover:bg-panel-2">
         <button
           className="flex min-w-0 flex-1 items-center gap-1.5 py-1.5 pr-2 text-left"
           style={{ paddingLeft: indent }}
@@ -247,7 +268,11 @@ function TreeNode({
           )}
           <span className="truncate text-[14px] text-fg">{entry.name}</span>
         </button>
-        {entry.type === 'file' && isMarkdown(entry.name) && <PreviewMenu onPreview={() => onPreview(entry.path)} />}
+        {entry.type === 'file' && (
+          <span className="shrink-0 pr-1.5">
+            <RowMenu label={`Actions for ${entry.name}`} actions={fileMenuActions(entry.path, onPreview)} />
+          </span>
+        )}
       </div>
 
       {entry.type === 'dir' && open && (
@@ -276,15 +301,6 @@ function TreeNode({
         </ul>
       )}
     </li>
-  )
-}
-
-/** The per-row markdown kebab: a single "Open preview" action, reusing the app's `ActionsMenu` (tap + hover, touch-first). */
-function PreviewMenu({ onPreview }: { onPreview: () => void }): React.JSX.Element {
-  return (
-    <div className="shrink-0 pr-1.5">
-      <ActionsMenu actions={[{ key: 'preview', label: 'Open preview', icon: Eye, onClick: onPreview }]} />
-    </div>
   )
 }
 

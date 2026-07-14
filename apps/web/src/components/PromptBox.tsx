@@ -1,6 +1,7 @@
 import { ArrowUp, Maximize2, Minimize2, Plus, X } from 'lucide-react'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { sendPrompt, uploadImages } from '../api.ts'
+import { HighlightedInput } from './HighlightedInput.tsx'
 import { Drawer, DrawerContent, DrawerDescription, DrawerHeader, DrawerTitle } from './ui/drawer.tsx'
 
 /** Mirrors workspace-server's UploadStore — kept in sync by hand since the
@@ -238,9 +239,9 @@ export function PromptBox({
     </button>
   )
 
+  // Shared by both HighlightedInput instances. `ref` and `value` are passed
+  // explicitly (HighlightedInput takes `textareaRef`/`value` as named props).
   const textareaCommonProps = {
-    ref: textareaRef,
-    value: text,
     disabled: !ready,
     placeholder: ready ? 'Plan, ask, build…' : (disabledReason ?? 'Pick a project and thread'),
     // Enter inserts a newline on a phone keyboard. Sending is a button.
@@ -303,11 +304,15 @@ export function PromptBox({
             <div style={{ gridArea: 'add' }} className="self-end">
               {addPhotoButton}
             </div>
-            <textarea
+            <HighlightedInput
               {...textareaCommonProps}
+              textareaRef={textareaRef}
+              value={text}
               rows={1}
-              style={{ gridArea: 'text' }}
-              className="prompt-input max-h-40 min-h-9 resize-none self-center bg-transparent px-2 py-1.5 text-fg outline-none"
+              wrapperStyle={{ gridArea: 'text' }}
+              wrapperClassName="self-center"
+              fieldClassName="prompt-input leading-normal px-2 py-1.5"
+              textareaClassName="max-h-40 min-h-9"
             />
             {/* Stays mounted even on a single line — just hidden — so
              *  toggling `isMultiline` never adds/removes this node either. */}
@@ -348,9 +353,13 @@ export function PromptBox({
           <div className="flex min-h-0 flex-1 flex-col px-4 pt-2">
             {error && <p className="mb-2 shrink-0 text-[13px] text-del">{error}</p>}
             {imagesStrip}
-            <textarea
+            <HighlightedInput
               {...textareaCommonProps}
-              className="prompt-input min-h-0 flex-1 resize-none bg-transparent pr-10 pb-2 text-fg outline-none"
+              textareaRef={textareaRef}
+              value={text}
+              wrapperClassName="min-h-0 flex-1"
+              fieldClassName="prompt-input leading-normal pr-10 pb-2"
+              textareaClassName="h-full"
             />
           </div>
 
