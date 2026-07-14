@@ -1,9 +1,11 @@
+import type { StorageResponse } from '@mce/protocol'
 import cors from '@fastify/cors'
 import httpProxy from '@fastify/http-proxy'
 import multipart from '@fastify/multipart'
 import fastifyStatic from '@fastify/static'
 import Fastify, { type FastifyInstance } from 'fastify'
 import { existsSync } from 'node:fs'
+import { statfs } from 'node:fs/promises'
 import type { BuildTracker } from './build-tracker.ts'
 import type { Config } from './config.ts'
 import type { Github } from './github.ts'
@@ -161,6 +163,20 @@ export async function buildServer(config: Config, services: Services): Promise<F
     agentReady: Boolean(config.claudeToken),
     pushReady: pusher.enabled,
   }))
+
+  // Disk usage of the volume holding the projects — surfaced as a bar on the
+  // picker so a full volume (which crash-loops the whole server on ENOSPC) is
+  // visible before it bites. `statfs` reports the real filesystem, so it counts
+  // everything on the volume (clones + their node_modules, the log, uploads),
+  // not just what a per-project `du` would find. `bavail` is space usable by the
+  // non-root server; used = total − that, so reserved blocks read as used (the
+  // safe direction for a "don't run out" gauge).
+  app.get('/api/storage', async () => {
+    const s = await statfs(config.projectsRoot)
+    const total = s.blocks * s.bsize
+    const free = s.bavail * s.bsize
+    return { total, used: total - free, free } satisfies StorageResponse
+  })
 
   registerEvents(app, log, config, presence)
   registerPresence(app, presence)

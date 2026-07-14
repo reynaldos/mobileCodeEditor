@@ -267,6 +267,18 @@ export interface ProjectsResponse {
   projects: Project[]
 }
 
+/**
+ * GET /api/storage — disk usage of the volume the projects live on. All bytes.
+ * `used + free === total`. Reserved (root-only) blocks count toward `used`, so
+ * this reads a touch fuller than a raw `du`, which is the safe bias for a gauge
+ * whose whole point is warning before ENOSPC takes the server down.
+ */
+export interface StorageResponse {
+  total: number
+  used: number
+  free: number
+}
+
 export type Visibility = 'public' | 'private'
 
 /**

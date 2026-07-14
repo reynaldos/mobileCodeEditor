@@ -1,12 +1,13 @@
-import type { GithubRepo, NameCheckResponse, Visibility } from '@mce/protocol'
+import type { GithubRepo, NameCheckResponse, StorageResponse, Visibility } from '@mce/protocol'
 import type { Project } from '@mce/protocol'
-import { Check, Globe, Loader, Lock, Search, Trash2, X } from 'lucide-react'
+import { Check, Globe, HardDrive, Loader, Lock, Search, Trash2, X } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   ApiError,
   checkProjectName,
   createProject,
   fetchGithubRepos,
+  fetchStorage,
   RemoveProjectConflictError,
   removeProject,
 } from '../api.ts'
@@ -60,6 +61,9 @@ export function ProjectPicker({ projects, activeId, failed, onSelect, onStarted,
           Close
         </button>
       </header>
+
+      {/* Refetches whenever the project count changes (a remove frees space). */}
+      <StorageBar refreshKey={projects.length} />
 
       <div className="flex-1 overflow-y-auto p-4">
         <ul className="flex flex-col gap-2">
@@ -140,6 +144,61 @@ export function ProjectPicker({ projects, activeId, failed, onSelect, onStarted,
       </div>
     </div>
   )
+}
+
+/**
+ * Volume usage as a slim bar under the header. This is the disk that a full
+ * `/data` crash-looped the whole server on (ENOSPC), so making it visible here —
+ * where you also delete projects — closes the loop: see it filling, offload a
+ * project, watch it drop. Refetches when `refreshKey` changes. Renders nothing
+ * until the first fetch resolves, so it never flashes a wrong number.
+ */
+function StorageBar({ refreshKey }: { refreshKey: number }): React.JSX.Element | null {
+  const [storage, setStorage] = useState<StorageResponse | null>(null)
+
+  useEffect(() => {
+    let alive = true
+    fetchStorage()
+      .then((s) => alive && setStorage(s))
+      .catch(() => alive && setStorage(null))
+    return () => {
+      alive = false
+    }
+  }, [refreshKey])
+
+  if (!storage || storage.total === 0) return null
+
+  const pct = Math.min(100, Math.round((storage.used / storage.total) * 100))
+  // Amber past 75%, red past 90% — the same "act before it bites" thresholds df
+  // users read into a Use%. Accent otherwise.
+  const fill = pct >= 90 ? 'bg-del' : pct >= 75 ? 'bg-warn' : 'bg-accent'
+
+  return (
+    <div className="border-b border-line px-4 py-2.5">
+      <div className="mb-1.5 flex items-center gap-1.5 text-[12px] text-muted">
+        <HardDrive className="size-3.5 shrink-0" />
+        <span className="text-fg">{formatBytes(storage.used)}</span>
+        <span>of {formatBytes(storage.total)} used</span>
+        <span className="ml-auto tabular-nums text-fg">{pct}%</span>
+      </div>
+      <div className="h-1.5 overflow-hidden rounded-full bg-panel-2">
+        <div className={`h-full rounded-full ${fill} transition-[width] duration-500`} style={{ width: `${pct}%` }} />
+      </div>
+    </div>
+  )
+}
+
+/** Bytes → a short human string (e.g. "4.6 GB"). One decimal below 10, else rounded. */
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`
+  const units = ['KB', 'MB', 'GB', 'TB']
+  let v = n / 1024
+  let i = 0
+  while (v >= 1024 && i < units.length - 1) {
+    v /= 1024
+    i++
+  }
+  return `${v < 10 ? v.toFixed(1) : Math.round(v)} ${units[i]}`
 }
 
 /** owner/repo, lowercased, no `.git` — for matching a project's remote to a repo. */

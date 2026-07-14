@@ -19,6 +19,7 @@ import type {
   RemoveProjectRequest,
   RenameThreadRequest,
   StartPreviewRequest,
+  StorageResponse,
   Thread,
   ThreadsResponse,
   UploadImagesResponse,
@@ -225,6 +226,13 @@ export async function fetchProjects(): Promise<Project[]> {
   const response = await fetch(`${BASE}/api/projects`)
   if (!response.ok) throw new ApiError(response.status, response.statusText)
   return ((await response.json()) as ProjectsResponse).projects
+}
+
+/** Disk usage of the projects volume — bytes. Powers the picker's storage bar. */
+export async function fetchStorage(): Promise<StorageResponse> {
+  const response = await fetch(`${BASE}/api/storage`)
+  if (!response.ok) throw new ApiError(response.status, response.statusText)
+  return (await response.json()) as StorageResponse
 }
 
 /**
