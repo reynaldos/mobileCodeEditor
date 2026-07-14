@@ -16,13 +16,13 @@ interface Props {
 export function SourceControlView({ projectId }: Props): React.JSX.Element {
   const [status, setStatus] = useState<GitStatusResponse | null>(null)
   const [error, setError] = useState(false)
-  const [expanded, setExpanded] = useState<string | null>(null)
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set())
 
   useEffect(() => {
     let cancelled = false
     setStatus(null)
     setError(false)
-    setExpanded(null)
+    setExpanded(new Set())
     void fetchGitStatus(projectId)
       .then((r) => !cancelled && setStatus(r))
       .catch(() => !cancelled && setError(true))
@@ -48,8 +48,15 @@ export function SourceControlView({ projectId }: Props): React.JSX.Element {
             projectId={projectId}
             file={f}
             base={status.base}
-            open={expanded === f.path}
-            onToggle={() => setExpanded((cur) => (cur === f.path ? null : f.path))}
+            open={expanded.has(f.path)}
+            onToggle={() =>
+              setExpanded((cur) => {
+                const next = new Set(cur)
+                if (next.has(f.path)) next.delete(f.path)
+                else next.add(f.path)
+                return next
+              })
+            }
           />
         ))}
       </ul>
