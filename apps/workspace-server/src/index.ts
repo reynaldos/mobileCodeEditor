@@ -91,6 +91,10 @@ for (const signal of ['SIGINT', 'SIGTERM'] as const) {
     app.log.info('shutting down')
     void (async () => {
       notifier.stop()
+      // Kill the preview's detached dev server so a restart (SIGTERM from
+      // `node --watch`, a deploy, a crash-restart) doesn't orphan it on the
+      // preview port — an orphan there wedges the next preview with EADDRINUSE.
+      previews.disposeActive()
       // Sessions first: stop() denies parked approvals so nothing hangs.
       await sessions.shutdown()
       await app.close()

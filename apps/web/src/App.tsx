@@ -7,7 +7,7 @@ import { BuildModal } from './components/BuildModal.tsx'
 import { EnvDrawer } from './components/EnvDrawer.tsx'
 import { MessageList } from './components/MessageList.tsx'
 import { NotificationsButton } from './components/NotificationsButton.tsx'
-import { PreviewDrawer } from './components/PreviewDrawer.tsx'
+import { PreviewDrawer, PREVIEW_PEEK } from './components/PreviewDrawer.tsx'
 import { ProjectPicker } from './components/ProjectPicker.tsx'
 import { PromptBox } from './components/PromptBox.tsx'
 import { StatusDot } from './components/StatusDot.tsx'
@@ -112,8 +112,15 @@ export function App(): React.JSX.Element {
   const showThreadsHome = activeProjectId !== null && activeThreadId === null && !showBuild
 
   return (
-    // `app` owns 100dvh and the keyboard inset. See styles.css.
-    <div className="app flex flex-col">
+    // `app` owns 100dvh and the keyboard inset. See styles.css. When a preview is
+    // peeked (open but lowered), `--preview-peek` reserves room at the bottom so
+    // the peeked bar doesn't sit on top of the prompt box.
+    <div
+      className="app flex flex-col"
+      style={
+        { '--preview-peek': preview.projectId !== null && !preview.raised ? PREVIEW_PEEK : '0px' } as React.CSSProperties
+      }
+    >
       <header className="flex shrink-0 items-center justify-between gap-3 border-b border-line bg-panel px-3.5 pb-2.5 pt-[calc(10px+env(safe-area-inset-top,0px))]">
         <button className="flex min-w-0 flex-col items-start" onClick={() => setOverlay('projects')} title="Switch project">
           <span className="flex min-w-0 items-center gap-1.5">

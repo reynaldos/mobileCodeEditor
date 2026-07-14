@@ -188,6 +188,23 @@ export class PreviewManager {
     this.#appendEvent(projectId, { type: 'preview_stopped', reason })
   }
 
+  /**
+   * Kill the active preview's process group without touching the tracker or log —
+   * last-ditch cleanup for process shutdown. `stop()` is the graceful, stateful
+   * path; this exists so a SIGTERM (including the one `node --watch` sends on every
+   * restart) doesn't leave the *detached* dev server orphaned and squatting on the
+   * preview port. An orphan there makes the next spawn fail with EADDRINUSE and
+   * exit ("exited with code 0"), while the iframe keeps loading the stale orphan.
+   * The log is reconciled on the next boot by `recoverOnBoot`.
+   */
+  disposeActive(): void {
+    this.#stopIdleWatch()
+    if (this.#child) {
+      killGroup(this.#child)
+      this.#child = undefined
+    }
+  }
+
   /** Any preview left running by the last process died with it — mark it stopped, not stuck. */
   recoverOnBoot(): void {
     const active = this.#log.activePreview()

@@ -55,7 +55,9 @@ body {
  */
 .app {
   height: var(--app-height);
-  padding-bottom: var(--keyboard-inset);
+  /* Keyboard inset plus, when a preview is peeked, the height of its bottom strip
+   * (--preview-peek, set in App.tsx) so the prompt box clears it. */
+  padding-bottom: calc(var(--keyboard-inset) + var(--preview-peek, 0px));
   transition: padding-bottom 120ms ease-out;
 }
 
