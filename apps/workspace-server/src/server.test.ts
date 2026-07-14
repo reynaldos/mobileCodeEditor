@@ -616,3 +616,116 @@ test('POST /api/prompt with an unknown imageId is a 400, not a silent drop', asy
   assert.equal(response.status, 400)
   assert.match(((await response.json()) as { error: string }).error, /unknown image/)
 })
+
+// --- Phase 3: file browser + git status --------------------------------
+
+test('GET /api/projects/:id/fs/tree lists the repo root, folders before files', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'mce-proot-'))
+  mkdirSync(join(root, 'app'))
+  mkdirSync(join(root, 'app', 'src'))
+  writeFileSync(join(root, 'app', 'README.md'), '# hi')
+  const { base } = await boot({ ...DEV, projectsRoot: root })
+
+  const res = await fetch(`${base}/api/projects/app/fs/tree`)
+  assert.equal(res.status, 200)
+  const body = (await res.json()) as { entries: { name: string; type: string }[] }
+  assert.deepEqual(
+    body.entries.map((e) => [e.name, e.type]),
+    [
+      ['src', 'dir'],
+      ['README.md', 'file'],
+    ],
+  )
+})
+
+test('GET /api/projects/:id/fs/tree is a 404 for an unknown project', async () => {
+  const { base } = await boot()
+  const res = await fetch(`${base}/api/projects/ghost/fs/tree`)
+  assert.equal(res.status, 404)
+})
+
+test('GET /api/projects/:id/fs/tree never escapes the project root via ../', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'mce-proot-'))
+  mkdirSync(join(root, 'app'))
+  writeFileSync(join(root, 'secret.txt'), 'not yours')
+  const { base } = await boot({ ...DEV, projectsRoot: root })
+
+  const res = await fetch(`${base}/api/projects/app/fs/tree?path=${encodeURIComponent('../')}`)
+  assert.equal(res.status, 404)
+})
+
+test('GET /api/projects/:id/fs/file returns a text file\'s contents', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'mce-proot-'))
+  mkdirSync(join(root, 'app'))
+  writeFileSync(join(root, 'app', 'hello.txt'), 'hi there')
+  const { base } = await boot({ ...DEV, projectsRoot: root })
+
+  const res = await fetch(`${base}/api/projects/app/fs/file?path=hello.txt`)
+  assert.equal(res.status, 200)
+  assert.equal(((await res.json()) as { content: string }).content, 'hi there')
+})
+
+test('GET /api/projects/:id/fs/file without a path is a 400', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'mce-proot-'))
+  mkdirSync(join(root, 'app'))
+  const { base } = await boot({ ...DEV, projectsRoot: root })
+
+  const res = await fetch(`${base}/api/projects/app/fs/file`)
+  assert.equal(res.status, 400)
+})
+
+test('GET /api/projects/:id/fs/file never reads outside the project root via ../', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'mce-proot-'))
+  mkdirSync(join(root, 'app'))
+  writeFileSync(join(root, 'secret.txt'), 'not yours')
+  const { base } = await boot({ ...DEV, projectsRoot: root })
+
+  const res = await fetch(`${base}/api/projects/app/fs/file?path=${encodeURIComponent('../secret.txt')}`)
+  assert.equal(res.status, 404)
+})
+
+test('GET /api/projects/:id/fs/search finds a literal match', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'mce-proot-'))
+  mkdirSync(join(root, 'app'))
+  writeFileSync(join(root, 'app', 'index.ts'), 'const needle = 1\n')
+  const { base } = await boot({ ...DEV, projectsRoot: root })
+
+  const res = await fetch(`${base}/api/projects/app/fs/search?q=needle`)
+  assert.equal(res.status, 200)
+  const body = (await res.json()) as { matches: { path: string; line: number }[] }
+  assert.deepEqual(body.matches, [{ path: 'index.ts', line: 1, text: 'const needle = 1' }])
+})
+
+test('GET /api/projects/:id/git/status lists an uncommitted change against HEAD', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'mce-proot-'))
+  const dir = join(root, 'app')
+  mkdirSync(dir)
+  execFileSync('git', ['-C', dir, 'init', '-q', '-b', 'main'])
+  execFileSync('git', ['-C', dir, 'config', 'user.email', 'a@b.c'])
+  execFileSync('git', ['-C', dir, 'config', 'user.name', 'a'])
+  writeFileSync(join(dir, 'a.txt'), 'one\n')
+  execFileSync('git', ['-C', dir, 'add', 'a.txt'])
+  execFileSync('git', ['-C', dir, 'commit', '-q', '-m', 'init'])
+  writeFileSync(join(dir, 'a.txt'), 'one\ntwo\n')
+
+  const { base } = await boot({ ...DEV, projectsRoot: root })
+  const res = await fetch(`${base}/api/projects/app/git/status`)
+  assert.equal(res.status, 200)
+  const body = (await res.json()) as { base?: string; files: { path: string; status: string }[] }
+  assert.ok(body.base)
+  assert.deepEqual(body.files, [{ path: 'a.txt', additions: 1, deletions: 0, status: 'modified' }])
+})
+
+test('GET /api/projects/:id/git/status on a repo with no commits yet reports no base and no files', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'mce-proot-'))
+  const dir = join(root, 'app')
+  mkdirSync(dir)
+  execFileSync('git', ['-C', dir, 'init', '-q', '-b', 'main'])
+
+  const { base } = await boot({ ...DEV, projectsRoot: root })
+  const res = await fetch(`${base}/api/projects/app/git/status`)
+  assert.equal(res.status, 200)
+  const body = (await res.json()) as { base?: string; files: unknown[] }
+  assert.equal(body.base, undefined)
+  assert.deepEqual(body.files, [])
+})

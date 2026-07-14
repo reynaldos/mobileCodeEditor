@@ -205,6 +205,9 @@ without touching a laptop.
 
 ## Phase 3 — Files and editor
 
+**Workshop draft in progress:** UX (drawer shape, entry points, tabs) and the FS/exec RPC
+surface being worked out in [PHASE-3.md](PHASE-3.md). Nothing built yet.
+
 File browser with ripgrep-backed search. CodeMirror 6, read-only first, then editable.
 
 This is where the FS/exec RPC surface gets built — and it's worth noticing that this single

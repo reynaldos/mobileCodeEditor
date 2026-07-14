@@ -22,7 +22,9 @@ import { registerChanges } from './routes/changes.ts'
 import { registerDebug } from './routes/debug.ts'
 import { registerEnv } from './routes/env.ts'
 import { registerEvents } from './routes/events.ts'
+import { registerFs } from './routes/fs.ts'
 import { registerGithub } from './routes/github.ts'
+import { registerGitStatus } from './routes/git-status.ts'
 import { registerPresence } from './routes/presence.ts'
 import { registerPreview } from './routes/preview.ts'
 import { registerProjects } from './routes/projects.ts'
@@ -271,6 +273,8 @@ export async function buildServer(config: Config, services: Services): Promise<F
   registerBuild(app, builds, projects, config)
   registerPreview(app, previews, previewTracker, config)
   registerChanges(app, projects)
+  registerFs(app, projects)
+  registerGitStatus(app, projects)
   registerEnv(app, projects)
   registerThreads(app, log, projects, sessions)
   registerGithub(app, projects, github)
