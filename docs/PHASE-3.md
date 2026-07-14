@@ -4,11 +4,16 @@ File browser with ripgrep-backed search. CodeMirror 6, read-only first, then edi
 where the FS/exec RPC surface gets built — the same surface Terminal (Phase 4) and Git UI
 (Phase 6) sit on top of.
 
-This doc is a workshop draft. Nothing is built yet. Branch: `phase-3/file-browser-editor`.
+Branch: `phase-3/file-browser-editor`.
 
-**Status.** UX shape being worked out below — one open question (drawer vs. full-screen panel)
-now has a recommendation; several others are still genuinely open. No server or client code
-written.
+**Status — ✅ built (read-only), on-device verification pending.** The design calls below were
+confirmed and shipped; the FS/exec RPC surface, the `ExplorerDrawer`, tree, read-only editor,
+and Source control view all exist. Since v1 the phase also grew a rendered **markdown preview**,
+a per-file **Copy path / Open preview** kebab, and **`@file` reference highlighting** in the
+prompt box — all captured in [As built](#as-built--what-actually-shipped) at the end of this
+doc. What's still deferred: file editing (write + Save), which stays the second pass, and every
+git write op (Phase 6). The design-call sections below are kept as the record of *why* each
+shape was chosen; read them as past tense.
 
 ---
 
@@ -258,3 +263,53 @@ whole phase applies double to anything past read-only browse + basic edit + basi
 > Tap Source control instead — a list of changed files appears; tapping one expands a unified,
 > git-style diff (the same rendering as an `Edit` tool call in the thread). No stage/commit/push
 > control exists yet — that's Phase 6.
+
+---
+
+## As built — what actually shipped
+
+v1 landed close to the design calls above. Server side: the path-guard helper plus
+`routes/changes.ts`, `routes/git-status.ts`, and the `fs`/`github` browse routes; `git-changes.ts`
+feeds `DiffView`. Client side, with two deltas from the sketch worth noting:
+
+- **Search folded into `FileTree.tsx`**, not a separate `FileSearch.tsx` — the "browse when
+  empty, search when typing" swap is one component, matching `ProjectPicker`'s repo search.
+- The **per-file kebab uses `RowMenu`, not `ActionsMenu`.** `RowMenu`'s `fixed`-positioned popup
+  doesn't get clipped by the scrolling tree and flips above the button near the bottom edge —
+  the header kebab still reuses `ActionsMenu` as design call 2 said.
+
+### Enhancements since v1 (2026-07-14)
+
+1. **Source control: multiple diffs open at once.** `SourceControlView` tracks expanded rows in a
+   `Set<path>` instead of a single active path, so several change bodies stay open together.
+2. **Rendered markdown preview.** A `.md`/`.mdx` file's kebab has **Open preview**, which opens a
+   *compiled* (not raw) view as its own read-only `(Preview) <name>` tab in the editor strip —
+   the preview counterpart to the CodeMirror source tab, so a file's source and preview can be
+   open side by side (`MarkdownPreview.tsx`, keyed `preview:<path>` in `FileEditor`). It uses
+   `react-markdown` + `remark-gfm` + `rehype-raw` + `rehype-sanitize` (real READMEs carry GFM
+   tables and embedded HTML the chat-only `Markdown.tsx` renderer was never meant to handle), and
+   is `React.lazy`-loaded so that ~100 kB stack stays code-split out of the initial bundle.
+3. **Scroll fixes.** `height="100%"` only sizes CodeMirror's inner `.cm-scroller`; its wrapper
+   was left `height:auto`, so long files grew past the drawer instead of scrolling. Adding
+   `h-full` to the wrapper (and to the preview's root) completes the height chain — both the
+   source viewer and the preview now scroll within the drawer.
+4. **Per-file kebab on every file.** **Copy path** (all files) and **Open preview** (markdown).
+   Copy writes the path as an `@`-reference (`@src/app/layout.tsx`) so a paste straight into the
+   prompt box is recognized without typing the `@`.
+5. **`@file` reference highlighting in the prompt box.** `HighlightedInput.tsx` — a backdrop
+   overlay behind a transparent-text `<textarea>` renders `@path` tokens (at a word boundary, so
+   emails don't light up) as a blue highlight, like the Claude editor extension. Wired into both
+   the compact and expanded `PromptBox` textareas.
+
+   **Accurate scope:** the highlight is a *visual affordance only*. The `@path` rides to the agent
+   as **plain text** — nothing expands it into file contents. Claude still recognizes it as a file
+   reference because the session runs with the `claude_code` system-prompt preset (where `@` is
+   the native mention convention), `cwd` is the project root, and it has `Read`/`Grep`/`Glob`
+   auto-approved — so it opens the file on demand rather than getting the contents pre-attached.
+   Real expansion (inline the file, extension-style) is a possible follow-up, deliberately not
+   done here.
+
+### Still deferred (unchanged)
+
+Editing (write + Save + `file_saved`), and all git write operations (stage/commit/push/discard —
+Phase 6). See [Deferred deliberately](#deferred-deliberately) above.
