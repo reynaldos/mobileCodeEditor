@@ -244,15 +244,14 @@ function Loading(): React.JSX.Element {
 function FileContent({ state, path }: { state: FileState | undefined; path: string }): React.JSX.Element {
   if (!state || state.content === null) {
     if (state?.error) return <p className="p-4 text-center text-[13px] text-del">{state.error}</p>
-    return (
-      <div className="flex h-full items-center justify-center gap-2 text-muted">
-        <Loader className="size-4 animate-spin" />
-        <span className="text-[13px]">Loading…</span>
-      </div>
-    )
+    return <Loading />
   }
   return (
+    // `height="100%"` only sizes CodeMirror's inner .cm-editor/.cm-scroller; the
+    // library's own wrapper stays `height:auto`, so without `h-full` here the
+    // editor grows to its full content height and never scrolls inside the tab.
     <CodeMirror
+      className="h-full"
       value={state.content}
       editable={false}
       theme="dark"

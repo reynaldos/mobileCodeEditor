@@ -91,7 +91,7 @@ export function MarkdownPreview({ projectId, path }: { projectId: string; path: 
   }
 
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto">
+    <div className="h-full overflow-y-auto">
       <div className="mx-auto max-w-2xl px-4 py-4 text-[14px] text-fg">
         <ReactMarkdown
           remarkPlugins={[remarkGfm]}
