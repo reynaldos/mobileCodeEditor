@@ -30,6 +30,10 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
+      # searchFiles shells out to ripgrep (fs-browser.ts), matching the runtime
+      # image (Dockerfile). GitHub's ubuntu runner doesn't ship it, so without
+      # this the fs-browser/search tests fail with empty results.
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ripgrep
       - run: pnpm install --frozen-lockfile
       - run: pnpm -r typecheck
       - run: pnpm -r test
