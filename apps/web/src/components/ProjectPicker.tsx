@@ -1,6 +1,6 @@
 import type { GithubRepo, NameCheckResponse, StorageResponse, Visibility } from '@mce/protocol'
 import type { Project } from '@mce/protocol'
-import { Check, Globe, HardDrive, Loader, Lock, Package, Search, Trash2, X } from 'lucide-react'
+import { Check, Files, Globe, HardDrive, Loader, Lock, Package, Search, Trash2, X } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   ApiError,
@@ -43,6 +43,8 @@ interface Props {
   /** A project's local directory was removed — the caller refetches the list (and its own active-id bookkeeping). */
   onRemoved: (projectId: string) => void
   onClose: () => void
+  /** Browse a project's files without switching into it (PHASE-3.md design call 3). */
+  onOpenExplorer: (projectId: string) => void
 }
 
 /**
@@ -51,7 +53,16 @@ interface Props {
  * opens its own drawer (Clone / Create). A trailing trash icon offloads a
  * project's local directory (Phase 6) — the git remote, if any, is untouched.
  */
-export function ProjectPicker({ projects, activeId, failed, onSelect, onStarted, onRemoved, onClose }: Props): React.JSX.Element {
+export function ProjectPicker({
+  projects,
+  activeId,
+  failed,
+  onSelect,
+  onStarted,
+  onRemoved,
+  onClose,
+  onOpenExplorer,
+}: Props): React.JSX.Element {
   const [removing, setRemoving] = useState<Project | undefined>()
   const [installErr, setInstallErr] = useState<string | undefined>()
 
@@ -102,6 +113,7 @@ export function ProjectPicker({ projects, activeId, failed, onSelect, onStarted,
                 <RowMenu
                   label={`Actions for ${p.name}`}
                   actions={[
+                    { key: 'explorer', label: 'Explorer', icon: Files, onClick: () => onOpenExplorer(p.id) },
                     { key: 'install', label: 'Install dependencies', icon: Package, onClick: () => runInstall(p) },
                     { key: 'remove', label: 'Remove project', icon: Trash2, destructive: true, onClick: () => setRemoving(p) },
                   ]}

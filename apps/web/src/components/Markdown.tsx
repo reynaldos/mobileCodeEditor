@@ -13,7 +13,10 @@ import { Check } from 'lucide-react'
 
 function renderInline(text: string, keyPrefix: string): React.ReactNode[] {
   const nodes: React.ReactNode[] = []
-  const re = /\*\*(.+?)\*\*|`([^`]+)`/g
+  // Order matters: bold (`**`) before italic (`*`) so the double-star form wins
+  // at a `**` position and the italic branch never fires on it.
+  const re =
+    /\*\*(.+?)\*\*|\*(?!\s)([^*\n]+?)\*|`([^`]+)`|\[([^\]]+)\]\(([^)\s]+)\)/g
   let last = 0
   let match: RegExpExecArray | null
   let i = 0
@@ -22,10 +25,24 @@ function renderInline(text: string, keyPrefix: string): React.ReactNode[] {
     if (match[1] !== undefined) {
       nodes.push(<strong key={`${keyPrefix}-${i++}`}>{match[1]}</strong>)
     } else if (match[2] !== undefined) {
+      nodes.push(<em key={`${keyPrefix}-${i++}`}>{match[2]}</em>)
+    } else if (match[3] !== undefined) {
       nodes.push(
         <code key={`${keyPrefix}-${i++}`} className="rounded bg-panel-2 px-1 py-0.5 font-mono text-[0.9em]">
-          {match[2]}
+          {match[3]}
         </code>,
+      )
+    } else if (match[4] !== undefined) {
+      nodes.push(
+        <a
+          key={`${keyPrefix}-${i++}`}
+          href={match[5]}
+          target="_blank"
+          rel="noreferrer noopener"
+          className="text-accent underline underline-offset-2"
+        >
+          {match[4]}
+        </a>,
       )
     }
     last = re.lastIndex
@@ -47,7 +64,10 @@ const BULLET_RE = /^[-*]\s+(.*)$/
 /** A bullet item's content, as a task: `[ ]`/`[x]` (GitHub) or the bare `[]` the model often writes. */
 const TASK_ITEM_RE = /^\[([ xX]?)\]\s+(.*)$/
 const FENCE_RE = /^```(\S*)$/
-const STRUCTURAL_RE = [HEADING_RE, ORDERED_RE, BULLET_RE]
+/** A thematic break: `---`, `***`, `___` (optionally spaced: `- - -`). */
+const HR_RE = /^ {0,3}([-*_])(?: *\1){2,} *$/
+const BLOCKQUOTE_RE = /^ {0,3}>\s?(.*)$/
+const STRUCTURAL_RE = [HEADING_RE, ORDERED_RE, BULLET_RE, HR_RE, BLOCKQUOTE_RE]
 const isStructural = (line: string): boolean => STRUCTURAL_RE.some((re) => re.test(line))
 
 export function Markdown({ text }: { text: string }): React.JSX.Element {
@@ -90,6 +110,34 @@ export function Markdown({ text }: { text: string }): React.JSX.Element {
             <code>{rows.join('\n')}</code>
           </pre>
         </div>,
+      )
+      continue
+    }
+
+    if (HR_RE.test(line)) {
+      blocks.push(<hr key={key++} className="my-1 border-line" />)
+      i++
+      continue
+    }
+
+    if (BLOCKQUOTE_RE.test(line)) {
+      const rows: string[] = []
+      let next = lines[i]
+      while (i < lines.length && next !== undefined && BLOCKQUOTE_RE.test(next)) {
+        rows.push(BLOCKQUOTE_RE.exec(next)?.[1] ?? '')
+        i++
+        next = lines[i]
+      }
+      const k = key++
+      blocks.push(
+        <blockquote key={k} className="border-l-2 border-line pl-3 text-muted">
+          {rows.map((r, j) => (
+            <span key={j}>
+              {j > 0 && <br />}
+              {renderInline(r, `bq${k}-${j}`)}
+            </span>
+          ))}
+        </blockquote>,
       )
       continue
     }

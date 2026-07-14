@@ -1,6 +1,6 @@
 import { LEGACY_THREAD_ID } from '@mce/protocol'
-import { ChevronDown, History, KeyRound, MessageCirclePlus, MonitorPlay } from 'lucide-react'
-import { useCallback, useEffect, useState } from 'react'
+import { ChevronDown, Files, GitBranch, History, KeyRound, MessageCirclePlus, MonitorPlay } from 'lucide-react'
+import { lazy, Suspense, useCallback, useEffect, useState } from 'react'
 import { deleteThread, fetchHealth, type Health, renameThread } from './api.ts'
 import { ActionsMenu } from './components/ActionsMenu.tsx'
 import { BuildModal } from './components/BuildModal.tsx'
@@ -19,6 +19,14 @@ import { usePreview } from './usePreview.ts'
 import { useProjects } from './useProjects.ts'
 import { useThreads } from './useThreads.ts'
 
+/**
+ * CodeMirror 6 (plus its language packages) is the single heaviest thing
+ * this app bundles — over 1MB minified, all for a drawer most sessions never
+ * open. Loaded as its own chunk, on first Explorer/Source-control open, so
+ * everyone else's initial PWA load stays light.
+ */
+const ExplorerDrawer = lazy(() => import('./components/ExplorerDrawer.tsx').then((m) => ({ default: m.ExplorerDrawer })))
+
 /** Which overlay is up, if any. null = the conversation (or the thread list — see `activeThreadId`). */
 type Overlay = 'projects' | null
 
@@ -31,6 +39,18 @@ export function App(): React.JSX.Element {
   const [health, setHealth] = useState<Health | undefined>()
   const [overlay, setOverlay] = useState<Overlay>(null)
   const [envOpen, setEnvOpen] = useState(false)
+  // The explorer's target project persists through a close (mirrors `usePreview`'s
+  // `projectId`) so the drawer can play its close animation instead of unmounting
+  // instantly — and so it can be opened for a project row that isn't the active
+  // one (PHASE-3.md design call 3: browse-without-switching).
+  const [explorerProjectId, setExplorerProjectId] = useState<string | null>(null)
+  const [explorerView, setExplorerView] = useState<'tree' | 'source-control'>('tree')
+  const [explorerOpen, setExplorerOpen] = useState(false)
+  const openExplorer = useCallback((projectId: string, view: 'tree' | 'source-control') => {
+    setExplorerProjectId(projectId)
+    setExplorerView(view)
+    setExplorerOpen(true)
+  }, [])
   const builds = useBuilds(state)
   const preview = usePreview(state.preview)
   useKeyboardInset()
@@ -156,6 +176,18 @@ export function App(): React.JSX.Element {
                   icon: KeyRound,
                   onClick: () => setEnvOpen(true),
                 },
+                {
+                  key: 'explorer',
+                  label: 'Explorer',
+                  icon: Files,
+                  onClick: () => activeProjectId && openExplorer(activeProjectId, 'tree'),
+                },
+                {
+                  key: 'source-control',
+                  label: 'Source control',
+                  icon: GitBranch,
+                  onClick: () => activeProjectId && openExplorer(activeProjectId, 'source-control'),
+                },
                 ...(activeProject?.previewSupported
                   ? [
                       {
@@ -240,10 +272,28 @@ export function App(): React.JSX.Element {
           }}
           onRemoved={() => void projectsState.refresh()}
           onClose={() => setOverlay(null)}
+          onOpenExplorer={(id) => {
+            openExplorer(id, 'tree')
+            setOverlay(null)
+          }}
         />
       )}
 
       {activeProjectId && <EnvDrawer projectId={activeProjectId} open={envOpen} onOpenChange={setEnvOpen} />}
+
+      {explorerProjectId && (
+        <Suspense fallback={null}>
+          <ExplorerDrawer
+            key={explorerProjectId}
+            projectId={explorerProjectId}
+            projectName={projects.find((p) => p.id === explorerProjectId)?.name ?? explorerProjectId}
+            branch={projects.find((p) => p.id === explorerProjectId)?.branch}
+            initialView={explorerView}
+            open={explorerOpen}
+            onOpenChange={setExplorerOpen}
+          />
+        </Suspense>
+      )}
 
       {/* Mounted regardless of the active project — a peeked preview for a project you've since
           navigated away from in the main nav stays alive and visible, per PHASE-5.md design call 7. */}

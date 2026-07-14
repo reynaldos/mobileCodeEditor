@@ -5,8 +5,13 @@ import type {
   CreateProjectResponse,
   EnvEntry,
   EnvFileResponse,
+  FsFileResponse,
+  FsSearchResponse,
+  FsTreeResponse,
   GithubRepo,
   GithubReposResponse,
+  GitRefreshResponse,
+  GitStatusResponse,
   ImageRef,
   NameCheckResponse,
   NewThreadResponse,
@@ -376,4 +381,44 @@ export async function fetchHealth(): Promise<Health> {
   const response = await fetch(`${BASE}/api/health`)
   if (!response.ok) throw new ApiError(response.status, response.statusText)
   return (await response.json()) as Health
+}
+
+// --- Files and editor (Phase 3) --------------------------------------------
+
+const fsUrl = (projectId: string, sub: string, query: Record<string, string> = {}): string => {
+  const qs = new URLSearchParams(query).toString()
+  return `${BASE}/api/projects/${encodeURIComponent(projectId)}/${sub}${qs ? `?${qs}` : ''}`
+}
+
+/** One level of a project's file tree. `path` empty/omitted fetches the repo root — the tree is browsed lazily, never walked all at once. */
+export async function fetchFileTree(projectId: string, path = ''): Promise<FsTreeResponse> {
+  const response = await fetch(fsUrl(projectId, 'fs/tree', path ? { path } : {}))
+  if (!response.ok) throw new ApiError(response.status, response.statusText)
+  return (await response.json()) as FsTreeResponse
+}
+
+/** A single text file's contents. Read-only for v1 (PHASE-3.md design call 7). */
+export async function fetchFileContent(projectId: string, path: string): Promise<FsFileResponse> {
+  const response = await fetch(fsUrl(projectId, 'fs/file', { path }))
+  if (!response.ok) throw new ApiError(response.status, response.statusText)
+  return (await response.json()) as FsFileResponse
+}
+
+/** ripgrep-backed content search across the project. */
+export async function searchProjectFiles(projectId: string, query: string): Promise<FsSearchResponse> {
+  const response = await fetch(fsUrl(projectId, 'fs/search', { q: query }))
+  if (!response.ok) throw new ApiError(response.status, response.statusText)
+  return (await response.json()) as FsSearchResponse
+}
+
+/** Working-tree-vs-HEAD changed files, for the read-only Source control view (staging/commit/push stay Phase 6). */
+export async function fetchGitStatus(projectId: string): Promise<GitStatusResponse> {
+  const response = await fetch(`${BASE}/api/projects/${encodeURIComponent(projectId)}/git/status`)
+  if (!response.ok) throw new ApiError(response.status, response.statusText)
+  return (await response.json()) as GitStatusResponse
+}
+
+/** Fetch + fast-forward the current branch onto its remote. Safe/narrow: refuses a dirty or diverged tree (see `GitRefreshResponse.reason`). */
+export async function refreshBranch(projectId: string): Promise<GitRefreshResponse> {
+  return (await post<GitRefreshResponse>(`/api/projects/${encodeURIComponent(projectId)}/git/refresh`, {}))!
 }

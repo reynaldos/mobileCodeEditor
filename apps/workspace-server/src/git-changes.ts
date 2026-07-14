@@ -16,6 +16,17 @@ async function git(cwd: string, args: string[]): Promise<string> {
   }
 }
 
+/** Like `git`, but reports success/failure — for mutating/network ops where the caller must know it worked. */
+async function tryGit(cwd: string, args: string[], timeoutMs?: number): Promise<{ ok: boolean; stderr: string }> {
+  try {
+    await run('git', ['-C', cwd, ...args], { maxBuffer: 64 * 1024 * 1024, ...(timeoutMs ? { timeout: timeoutMs } : {}) })
+    return { ok: true, stderr: '' }
+  } catch (err) {
+    const stderr = err && typeof err === 'object' && 'stderr' in err ? String((err as { stderr: unknown }).stderr) : String(err)
+    return { ok: false, stderr }
+  }
+}
+
 /** Current HEAD, captured at turn start so we can diff what a turn changed. */
 export async function headSha(cwd: string): Promise<string | undefined> {
   const out = (await git(cwd, ['rev-parse', 'HEAD'])).trim()
@@ -72,6 +83,38 @@ export async function changedFiles(cwd: string, base: string): Promise<ChangedFi
   }
 
   return [...files.values()].sort((a, b) => a.path.localeCompare(b.path))
+}
+
+/**
+ * The branch's upstream tracking ref plus ahead/behind counts, or undefined if
+ * it tracks no remote. No network — the counts reflect the last fetch, exactly
+ * like `git status`'s "your branch is behind…" line.
+ */
+export async function upstreamStatus(cwd: string): Promise<{ name: string; ahead: number; behind: number } | undefined> {
+  const name = (await git(cwd, ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{upstream}'])).trim()
+  if (!name) return undefined
+  // `--left-right --count @{upstream}...HEAD`: left = commits only on upstream (behind), right = only on HEAD (ahead).
+  const counts = (await git(cwd, ['rev-list', '--left-right', '--count', '@{upstream}...HEAD'])).trim()
+  const [behind, ahead] = counts.split(/\s+/).map((n) => Number(n) || 0)
+  return { name, behind: behind ?? 0, ahead: ahead ?? 0 }
+}
+
+/** Any uncommitted or untracked change in the working tree — the guard the refresh refuses to cross. */
+export async function isDirty(cwd: string): Promise<boolean> {
+  return (await git(cwd, ['status', '--porcelain'])).trim().length > 0
+}
+
+/**
+ * Fetch the branch's remote and fast-forward the local branch onto it. Caller
+ * MUST have already confirmed the tree is clean (see `isDirty`). Never merges or
+ * rebases: `--ff-only` succeeds when up-to-date or purely behind, and fails
+ * (→ 'diverged') the moment a real merge would be required.
+ */
+export async function fastForwardToUpstream(cwd: string): Promise<'ok' | 'diverged' | 'error'> {
+  const fetched = await tryGit(cwd, ['fetch', '--quiet'], 20_000)
+  if (!fetched.ok) return 'error'
+  const ff = await tryGit(cwd, ['merge', '--ff-only', '@{upstream}'])
+  return ff.ok ? 'ok' : 'diverged'
 }
 
 /** Before/after text for one file, for the client's unified diff view. */

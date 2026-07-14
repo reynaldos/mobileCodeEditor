@@ -28,7 +28,8 @@ against a container running on Fly.io that never sleeps, with your laptop closed
 | Phase 2.6 — visible project setup (stream, install, cancel, notify) | ✅ done, on-device verified |
 | Phase 2.7 — questions UI, allowlist, changes accordion, git identity, `.env` editor | ✅ done, on-device verified |
 | UX polish pass (PromptBox, images, PWA, markdown replies, tool-call grouping, header) | ✅ done, on-device verified, two known issues open (below) |
-| Phase 3 — files + editor · 4 — terminal · 5 — preview · 6 — convenience | ▫️ not started |
+| Phase 3 — files + editor (browser, read-only viewer, Source control, markdown preview, `@`-refs) | ✅ built on `phase-3/file-browser-editor`, on-device verification pending |
+| Phase 4 — terminal · 5 — preview · 6 — convenience | ▫️ not started |
 
 **Known issues, deliberately deferred** (see [ON-DEVICE-CHECKLIST.md](ON-DEVICE-CHECKLIST.md)
 for repro notes) — neither blocks moving on:
@@ -203,7 +204,16 @@ without touching a laptop.
 
 ---
 
-## Phase 3 — Files and editor
+## Phase 3 — Files and editor — ✅ built (read-only), on-device verification pending
+
+**Shipped on `phase-3/file-browser-editor`.** The full design and the as-built delta live in
+[PHASE-3.md](PHASE-3.md). What's in: the `ExplorerDrawer` (Files / Source control views), a lazy
+ripgrep-backed `FileTree`, a read-only CodeMirror 6 viewer with an 8-tab LRU strip, a read-only
+`SourceControlView` (multiple change diffs expandable at once), a rendered **markdown preview**
+that opens as its own read-only `(Preview)` tab (react-markdown + GFM + sanitized raw HTML), a
+per-file kebab (**Copy path** as an `@`-reference, **Open preview** for markdown), and `@file`
+reference highlighting in the prompt box. Editing (write + Save) is still the deliberate second
+pass; Source control stays read-only (stage/commit/push is Phase 6).
 
 File browser with ripgrep-backed search. CodeMirror 6, read-only first, then editable.
 
