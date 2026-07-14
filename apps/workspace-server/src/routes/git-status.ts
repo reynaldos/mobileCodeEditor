@@ -1,6 +1,6 @@
 import type { GitStatusResponse } from '@mce/protocol'
 import type { FastifyInstance } from 'fastify'
-import { changedFiles, headSha } from '../git-changes.ts'
+import { changedFiles, headSha, upstreamStatus } from '../git-changes.ts'
 import type { ProjectStore } from '../projects.ts'
 
 /**
@@ -20,6 +20,9 @@ export function registerGitStatus(app: FastifyInstance, projects: ProjectStore):
 
     const base = await headSha(cwd)
     const files = base ? await changedFiles(cwd, base) : []
-    return reply.send({ base, files } satisfies GitStatusResponse)
+    // Cheap (no network): reflects the last fetch, like `git status`. The
+    // refresh endpoint is what fetches to bring these counts up to date.
+    const upstream = await upstreamStatus(cwd)
+    return reply.send({ base, files, ...(upstream ? { upstream } : {}) } satisfies GitStatusResponse)
   })
 }

@@ -287,6 +287,7 @@ export function App(): React.JSX.Element {
             key={explorerProjectId}
             projectId={explorerProjectId}
             projectName={projects.find((p) => p.id === explorerProjectId)?.name ?? explorerProjectId}
+            branch={projects.find((p) => p.id === explorerProjectId)?.branch}
             initialView={explorerView}
             open={explorerOpen}
             onOpenChange={setExplorerOpen}

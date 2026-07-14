@@ -11,6 +11,8 @@ type View = 'tree' | 'file' | 'source-control'
 interface Props {
   projectId: string
   projectName: string
+  /** Current git branch, shown under the project name — same live `Project.branch` the main header reads, so it tracks branch changes the same way. */
+  branch?: string
   /** Which view to land on when this opens — the nav-bar's Explorer and Source control entries (and a project row's Explorer action) each pick one. */
   initialView: View
   open: boolean
@@ -29,7 +31,7 @@ interface Props {
  * the active file's name once one's open. Right is the existing
  * `ActionsMenu` kebab, reused as-is.
  */
-export function ExplorerDrawer({ projectId, projectName, initialView, open, onOpenChange }: Props): React.JSX.Element {
+export function ExplorerDrawer({ projectId, projectName, branch, initialView, open, onOpenChange }: Props): React.JSX.Element {
   const [view, setView] = useState<View>(initialView)
   const [refreshKey, setRefreshKey] = useState(0)
   const tabs = useOpenFiles()
@@ -71,7 +73,11 @@ export function ExplorerDrawer({ projectId, projectName, initialView, open, onOp
           >
             {focused ? <ChevronLeft className="size-5" /> : <X className="size-5" />}
           </button>
-          <span className="min-w-0 flex-1 truncate text-center text-[15px] font-semibold text-fg">{title}</span>
+          <div className="flex min-w-0 flex-1 flex-col items-center">
+            <span className="max-w-full truncate text-[15px] font-semibold text-fg">{title}</span>
+            {/* Branch belongs with the project name — hidden in the focused file/preview view where the title is a filename. */}
+            {!focused && branch && <span className="max-w-full truncate text-xs text-muted">{branch}</span>}
+          </div>
           <ActionsMenu
             actions={[{ key: 'refresh', label: 'Refresh', icon: RotateCw, onClick: () => setRefreshKey((k) => k + 1) }]}
           />

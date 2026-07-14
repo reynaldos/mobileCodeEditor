@@ -308,8 +308,34 @@ feeds `DiffView`. Client side, with two deltas from the sketch worth noting:
    auto-approved — so it opens the file on demand rather than getting the contents pre-attached.
    Real expansion (inline the file, extension-style) is a possible follow-up, deliberately not
    done here.
+6. **Branch shown in the drawer header + a narrow "Refresh" sync.** The current branch renders
+   under the project name in the `ExplorerDrawer` header (same live `Project.branch` the main nav
+   reads, so it tracks the agent's `git checkout`s the same way). In the Source control view,
+   when the branch tracks a remote, a header row shows how it sits against upstream (`N behind
+   origin/main`) and a **Refresh** button that fetches + fast-forwards
+   (`POST /git/refresh` → `git fetch` then `git merge --ff-only`). It is deliberately safe: it
+   refuses a **dirty tree** (the button is disabled with a "commit or stash first" warning — the
+   exact breaking case to avoid) and a **diverged branch** (`--ff-only` fails rather than guessing
+   a merge). `GitStatusResponse.upstream` carries the ahead/behind counts, computed *without* a
+   network fetch on read (same as `git status`) — the counts are only guaranteed fresh right after
+   a Refresh.
+
+### Proper source control — the deliberate next step
+
+The branch Refresh above is a stopgap, not the real thing. What it explicitly does **not** do,
+and what a proper pass (Phase 6-shaped) should cover:
+
+- **Fetch cadence.** `git/status` doesn't fetch, so `behind` reflects the last fetch until you
+  hit Refresh. Proper handling wants a background/periodic fetch (or a push-based signal) so
+  "out of sync" is known without a manual poke.
+- **Divergence.** A diverged branch is refused today. Real handling = an explicit merge vs.
+  rebase choice, and conflict resolution UI.
+- **Stash/commit integration.** The dirty guard just tells you to commit or stash elsewhere;
+  there's no stash/commit affordance here yet.
+- **Stage / commit / push** proper — still Phase 6, on the same RPC surface.
 
 ### Still deferred (unchanged)
 
-Editing (write + Save + `file_saved`), and all git write operations (stage/commit/push/discard —
-Phase 6). See [Deferred deliberately](#deferred-deliberately) above.
+Editing (write + Save + `file_saved`), and all git *write* operations beyond the ff-only branch
+refresh — stage/commit/push/discard/stash/merge — stay Phase 6. See [Deferred
+deliberately](#deferred-deliberately) above.

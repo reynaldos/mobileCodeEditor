@@ -10,6 +10,7 @@ import type {
   FsTreeResponse,
   GithubRepo,
   GithubReposResponse,
+  GitRefreshResponse,
   GitStatusResponse,
   ImageRef,
   NameCheckResponse,
@@ -415,4 +416,9 @@ export async function fetchGitStatus(projectId: string): Promise<GitStatusRespon
   const response = await fetch(`${BASE}/api/projects/${encodeURIComponent(projectId)}/git/status`)
   if (!response.ok) throw new ApiError(response.status, response.statusText)
   return (await response.json()) as GitStatusResponse
+}
+
+/** Fetch + fast-forward the current branch onto its remote. Safe/narrow: refuses a dirty or diverged tree (see `GitRefreshResponse.reason`). */
+export async function refreshBranch(projectId: string): Promise<GitRefreshResponse> {
+  return (await post<GitRefreshResponse>(`/api/projects/${encodeURIComponent(projectId)}/git/refresh`, {}))!
 }

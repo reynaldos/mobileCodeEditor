@@ -562,4 +562,46 @@ export interface GitStatusResponse {
   /** Undefined for a repo with no commits yet — nothing to diff against. */
   base?: string
   files: ChangedFile[]
+  /**
+   * Upstream tracking state, present only when the branch tracks a remote.
+   * `ahead`/`behind` are counted against the *last-fetched* upstream ref — no
+   * network fetch happens on read (same semantics as `git status`). The refresh
+   * endpoint below is what actually fetches.
+   */
+  upstream?: GitUpstream
+}
+
+/** A branch's position relative to its remote-tracking ref. */
+export interface GitUpstream {
+  /** e.g. `origin/main`. */
+  name: string
+  /** Local commits not yet on the remote. */
+  ahead: number
+  /** Remote commits not yet local — what a refresh would fast-forward. */
+  behind: number
+}
+
+/**
+ * POST /api/projects/:id/git/refresh — fetch the branch's remote and
+ * fast-forward the local branch onto it. Deliberately minimal and safe: it
+ * NEVER merges, rebases, or touches uncommitted work. A dirty tree is refused
+ * (`reason: 'dirty'`) so nothing is silently clobbered, and a diverged branch
+ * is refused (`reason: 'diverged'`) rather than guessed at. Full source control
+ * — stage/commit/push/stash/conflict resolution — is Phase 6.
+ */
+export interface GitRefreshResponse {
+  ok: boolean
+  /** New HEAD after a successful fast-forward. */
+  base?: string
+  /** Fresh upstream counts (post-fetch on success, or the current ones on refusal). */
+  upstream?: GitUpstream
+  /**
+   * Why a refresh didn't (fully) happen:
+   *  - `dirty`        uncommitted/untracked changes — commit or stash first
+   *  - `diverged`     local and remote both moved — needs a real merge/rebase (Phase 6)
+   *  - `no-upstream`  the branch tracks no remote
+   *  - `error`        git or network failure
+   */
+  reason?: 'dirty' | 'diverged' | 'no-upstream' | 'error'
+  error?: string
 }
