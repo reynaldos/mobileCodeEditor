@@ -244,6 +244,16 @@ export async function createProject(body: CreateProjectRequest): Promise<CreateP
   return (await post<CreateProjectResponse>('/api/projects', body))!
 }
 
+/**
+ * Re-run dependency install for an existing project (the fix for a preview that
+ * fails with a `.../.bin/<tool> ENOENT`). 202; watch the build stream for
+ * progress, same as create.
+ */
+export async function installDependencies(projectId: string): Promise<void> {
+  const response = await fetch(`${BASE}/api/projects/${encodeURIComponent(projectId)}/install`, { method: 'POST' })
+  if (!response.ok) throw new ApiError(response.status, response.statusText)
+}
+
 /** A live session/build/preview is still using the project — the caller offers a confirm dialog listing `blockers`, then retries with `force: true`. */
 export class RemoveProjectConflictError extends ApiError {
   constructor(

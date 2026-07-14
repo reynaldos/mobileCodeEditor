@@ -9,7 +9,7 @@ import type { FastifyInstance } from 'fastify'
 import type { EventLog } from '../log.ts'
 import type { PreviewManager } from '../preview-manager.ts'
 import type { PreviewTracker } from '../preview-tracker.ts'
-import { CreateError, RemoveError, type ProjectStore } from '../projects.ts'
+import { CreateError, InstallError, RemoveError, type ProjectStore } from '../projects.ts'
 import type { SessionManager } from '../session-manager.ts'
 import type { BuildTracker } from '../build-tracker.ts'
 
@@ -31,6 +31,22 @@ export function registerProjects(
 ): void {
   app.get('/api/projects', async () => {
     return { projects: projects.list() } satisfies ProjectsResponse
+  })
+
+  // Re-run dependency install for a project that has none (a failed/absent install
+  // on clone) — the fix for a preview that dies with `spawn .../.bin/next ENOENT`.
+  // 202 + the build stream carries progress, same as create.
+  app.post('/api/projects/:projectId/install', async (request, reply) => {
+    const { projectId } = request.params as { projectId: string }
+    if (!projects.exists(projectId)) return reply.code(404).send({ error: 'no such project' })
+    if (builds.isActive(projectId)) return reply.code(409).send({ error: 'a build is already in progress' })
+    try {
+      projects.install(projectId)
+      return reply.code(202).send()
+    } catch (err) {
+      if (err instanceof InstallError) return reply.code(400).send({ error: err.message })
+      throw err
+    }
   })
 
   app.post('/api/projects', async (request, reply) => {

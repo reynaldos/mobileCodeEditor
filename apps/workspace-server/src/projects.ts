@@ -132,9 +132,8 @@ export class ProjectStore {
       const install = detectInstall(path)
       if (install) {
         this.#builds?.phase(id, 'installing')
-        this.#builds?.line(id, `$ ${install.cmd} ${install.args.join(' ')}`)
         try {
-          await this.#spawn(install.cmd, install.args, id, signal, path)
+          await this.#installDeps(id, path, install, signal)
         } catch (err) {
           if (signal?.aborted) throw err
           warning = `Dependency install failed: ${messageOf(err)}`
@@ -231,6 +230,57 @@ export class ProjectStore {
     this.#emit({ type: 'project_removed' }, id)
   }
 
+  /**
+   * (Re)install a project's dependencies. The clone flow treats a failed install
+   * as a warning (the repo is still usable), which leaves a project with no
+   * `node_modules` — and then preview dies with `spawn .../.bin/<tool> ENOENT`.
+   * This re-runs the detected package manager so the project can build/preview.
+   * Returns immediately; the work streams through the same `BuildTracker` the
+   * picker's build modal reads, so it shows live progress and a Ready/failed end.
+   */
+  install(id: string): void {
+    const path = this.pathOf(id)
+    if (!path || !this.exists(id)) throw new InstallError(`no such project: ${id}`)
+    const install = detectInstall(path)
+    if (!install) throw new InstallError('no package manifest found — nothing to install')
+    void this.#runInstall(id, path, install)
+  }
+
+  async #runInstall(id: string, path: string, install: { cmd: string; args: string[] }): Promise<void> {
+    const signal = this.#builds?.start(id)
+    this.#builds?.phase(id, 'installing')
+    try {
+      await this.#installDeps(id, path, install, signal)
+      this.#builds?.phase(id, 'ready')
+    } catch (err) {
+      const aborted = signal?.aborted ?? false
+      this.#builds?.phase(id, aborted ? 'cancelled' : 'error', { error: aborted ? 'Cancelled' : messageOf(err) })
+    }
+  }
+
+  /**
+   * Run the detected install, retrying npm once with `--legacy-peer-deps` on
+   * failure. npm 7+ hard-fails on peer-dependency conflicts (ERESOLVE) that
+   * yarn/pnpm/bun — and npm 6 — only warn about; that's a common reason an older
+   * repo won't install at all. The retry is what npm's own error message tells
+   * you to do. Only npm needs it; the others already resolve leniently.
+   */
+  async #installDeps(
+    id: string,
+    path: string,
+    install: { cmd: string; args: string[] },
+    signal: AbortSignal | undefined,
+  ): Promise<void> {
+    this.#builds?.line(id, `$ ${install.cmd} ${install.args.join(' ')}`)
+    try {
+      await this.#spawn(install.cmd, install.args, id, signal, path)
+    } catch (err) {
+      if (install.cmd !== 'npm' || signal?.aborted) throw err
+      this.#builds?.line(id, 'install failed — retrying with --legacy-peer-deps…')
+      await this.#spawn('npm', ['install', '--legacy-peer-deps'], id, signal, path)
+    }
+  }
+
   #createdAtByProject(): Record<string, number> {
     const out: Record<string, number> = {}
     for (const e of this.#log.projectCreations()) out[e.name] = e.ts
@@ -252,6 +302,8 @@ export class ProjectStore {
 export class RemoveError extends Error {}
 
 export class CreateError extends Error {}
+
+export class InstallError extends Error {}
 
 /**
  * Which install command a freshly-cloned project wants, from its lockfile (then

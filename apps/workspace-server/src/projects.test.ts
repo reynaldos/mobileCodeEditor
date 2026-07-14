@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict'
-import { execFileSync, spawn } from 'node:child_process'
+import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
 import { setTimeout as sleep } from 'node:timers/promises'
+import { BuildTracker } from './build-tracker.ts'
 import { openDb } from './db.ts'
 import { EventLog } from './log.ts'
 import type { Github } from './github.ts'
@@ -369,4 +370,75 @@ test('detectDevCommand returns undefined when neither the root nor any monorepo 
   mkdirSync(join(root, 'apps', 'server'), { recursive: true })
   writePackageJson(join(root, 'apps', 'server'), { scripts: { dev: 'tsx watch src/index.ts' } })
   assert.equal(detectDevCommand(root), undefined)
+})
+
+// --- install(): re-run dependency install, retrying npm on peer conflicts ----
+
+/** A ChildProcess just real enough for `#spawn`: no output, closes with `code`. */
+function fakeChild(code: number): ChildProcess {
+  const noop = { on: () => undefined }
+  const child = {
+    stdout: noop,
+    stderr: noop,
+    on(event: string, cb: (arg?: unknown) => void) {
+      if (event === 'close') queueMicrotask(() => cb(code))
+      return child
+    },
+  }
+  return child as unknown as ChildProcess
+}
+
+async function settle(builds: BuildTracker, id: string): Promise<void> {
+  for (let i = 0; i < 400 && builds.snapshot(id)?.phase === 'installing'; i++) await sleep(5)
+}
+
+test('install retries npm with --legacy-peer-deps after a plain npm install fails', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'mce-store-'))
+  const log = new EventLog(openDb(':memory:'), makeRedactor([]))
+  mkdirSync(join(root, 'app'))
+  writePackageJson(join(root, 'app'), { name: 'app' }) // package.json → npm
+
+  const calls: string[][] = []
+  const spawnFn: SpawnFn = (cmd, args) => {
+    calls.push([cmd, ...args])
+    return fakeChild(args.includes('--legacy-peer-deps') ? 0 : 1) // plain fails, legacy succeeds
+  }
+  const builds = new BuildTracker()
+  const store = new ProjectStore(root, log, undefined, builds, spawnFn)
+
+  store.install('app')
+  await settle(builds, 'app')
+
+  assert.deepEqual(calls[0], ['npm', 'install'])
+  assert.deepEqual(calls[1], ['npm', 'install', '--legacy-peer-deps'])
+  assert.equal(builds.snapshot('app')?.phase, 'ready')
+})
+
+test('install does NOT retry pnpm/yarn — only npm hard-fails on peer conflicts', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'mce-store-'))
+  const log = new EventLog(openDb(':memory:'), makeRedactor([]))
+  mkdirSync(join(root, 'app'))
+  writePackageJson(join(root, 'app'), { name: 'app' })
+  writeFileSync(join(root, 'app', 'pnpm-lock.yaml'), '') // → pnpm
+
+  const calls: string[][] = []
+  const spawnFn: SpawnFn = (cmd, args) => {
+    calls.push([cmd, ...args])
+    return fakeChild(1) // always fails
+  }
+  const builds = new BuildTracker()
+  const store = new ProjectStore(root, log, undefined, builds, spawnFn)
+
+  store.install('app')
+  await settle(builds, 'app')
+
+  assert.deepEqual(calls, [['pnpm', 'install']]) // one attempt, no retry
+  assert.equal(builds.snapshot('app')?.phase, 'error')
+})
+
+test('install throws for an unknown project and one with no manifest', () => {
+  const { store, root } = freshStore()
+  assert.throws(() => store.install('ghost'), /no such project/)
+  mkdirSync(join(root, 'bare')) // exists, but nothing to install
+  assert.throws(() => store.install('bare'), /nothing to install/)
 })

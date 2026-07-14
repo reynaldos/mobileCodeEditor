@@ -142,14 +142,23 @@ export async function buildServer(config: Config, services: Services): Promise<F
   // and CRA's `/static/*` + `/ws` are absolute paths outside this prefix
   // entirely — the registrations below catch those.
   const ROOT_SPAWNED_FRAMEWORKS = new Set(['next', 'cra'])
+  // Fixed `/preview` prefix, NOT `/preview/:projectId`. With a `:param` prefix,
+  // @fastify/http-proxy's rewrite rebuilds the first N path segments from the
+  // param — and after `preRewrite` strips the prefix for a root-spawned app, a
+  // nested public asset like `/logo/ball.png` (3 segments) gets its whole path
+  // replaced back with `/preview/<id>`, so CRA/Next receive garbage and answer
+  // with index.html. (Single-segment paths and the document happened to survive,
+  // which is why only nested images broke.) A plain prefix takes the simple
+  // startsWith branch instead, leaving the stripped path intact. See the proxy's
+  // `fromParameters`. The projectId now comes off the URL, not `request.params`.
+  const previewProjectId = (url: string): string => decodeURIComponent(url.split('?')[0]!.split('/')[2] ?? '')
   await app.register(httpProxy, {
     upstream: `http://127.0.0.1:${config.previewPort}`,
-    prefix: '/preview/:projectId',
-    rewritePrefix: '/preview/:projectId',
+    prefix: '/preview',
+    rewritePrefix: '/preview',
     websocket: true,
     preHandler: (request, reply, done) => {
-      const { projectId } = request.params as { projectId: string }
-      if (previewTracker.activeProjectId() !== projectId) {
+      if (previewTracker.activeProjectId() !== previewProjectId(request.url)) {
         void reply.code(404).send({ error: 'no active preview for this project' })
         return
       }

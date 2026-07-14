@@ -368,6 +368,36 @@ test('GET /api/projects lists projects; POST creates one', async () => {
   assert.equal(((await created.json()) as { projectId: string }).projectId, 'fresh')
 })
 
+// --- POST /api/projects/:id/install (re-run dependency install) -------------
+
+test('POST /api/projects/:id/install is a 404 for an unknown project', async () => {
+  const { base } = await boot()
+  const res = await fetch(`${base}/api/projects/ghost/install`, { method: 'POST' })
+  assert.equal(res.status, 404)
+})
+
+test('POST /api/projects/:id/install is a 400 when there is no package manifest to install', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'mce-proot-'))
+  mkdirSync(join(root, 'app'))
+  execFileSync('git', ['-C', join(root, 'app'), 'init', '-q'])
+  const { base } = await boot({ ...DEV, projectsRoot: root })
+
+  const res = await fetch(`${base}/api/projects/app/install`, { method: 'POST' })
+  assert.equal(res.status, 400)
+  assert.match(((await res.json()) as { error: string }).error, /nothing to install/i)
+})
+
+test('POST /api/projects/:id/install is a 409 while a build is already in progress', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'mce-proot-'))
+  mkdirSync(join(root, 'app'))
+  execFileSync('git', ['-C', join(root, 'app'), 'init', '-q'])
+  const { base, builds } = await boot({ ...DEV, projectsRoot: root })
+
+  builds.start('app')
+  const res = await fetch(`${base}/api/projects/app/install`, { method: 'POST' })
+  assert.equal(res.status, 409)
+})
+
 // --- DELETE /api/projects/:id (Phase 6 — remove/offload) --------------------
 
 test('DELETE /api/projects/:id removes the directory and appends project_removed', async () => {
