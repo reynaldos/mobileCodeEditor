@@ -46,6 +46,7 @@ export function PreviewDrawer({ preview, projects }: Props): React.JSX.Element {
   // navigates. Null until the first read → the box falls back to the base URL.
   const [currentUrl, setCurrentUrl] = useState<string | null>(null)
   const iframeRef = useRef<HTMLIFrameElement>(null)
+  const contentRef = useRef<HTMLDivElement>(null)
 
   // A fresh projectId is a fresh preview instance — nothing carries over.
   useEffect(() => {
@@ -91,22 +92,43 @@ export function PreviewDrawer({ preview, projects }: Props): React.JSX.Element {
     return () => window.removeEventListener('message', onMessage)
   }, [])
 
-  // Vaul locks `document.body { pointer-events: none }` while the drawer sits at
-  // its full snap (so the raised preview reads as modal) and does NOT lift it when
-  // you lower to the peek strip — which leaves the whole thread behind unclickable
-  // until you fully close. While peeked, force the body interactive; re-assert via
-  // an observer because Vaul rewrites the body style on every snap/drag. When
-  // raised the drawer covers the screen, so the lock is correct and left alone.
+  // While peeked, undo two Vaul "modal" behaviors that make the thread behind the
+  // drawer unusable. Both are correct while RAISED (the drawer covers the screen),
+  // so this only runs when lowered to the peek strip.
+  //  1) Vaul locks `body { pointer-events: none }` — nothing behind it is clickable.
+  //  2) Vaul's Radix focus scope is `trapped`, so focus is yanked back to the drawer
+  //     the instant you focus a thread input — you can click it (I-beam shows) but
+  //     can't type. Headless browsers skip that refocus, which is why it only shows
+  //     in a real browser.
   useEffect(() => {
     if (projectId === null || raised) return
     const body = document.body
+
+    // (1) keep the body interactive; re-assert since Vaul rewrites the style on snap/drag.
     const unlock = (): void => {
       if (body.style.pointerEvents === 'none') body.style.pointerEvents = 'auto'
     }
     unlock()
-    const observer = new MutationObserver(unlock)
-    observer.observe(body, { attributes: true, attributeFilter: ['style'] })
-    return () => observer.disconnect()
+    const styleObserver = new MutationObserver(unlock)
+    styleObserver.observe(body, { attributes: true, attributeFilter: ['style'] })
+
+    // (2) stop the focus-scope steal: swallow focus events, before Radix's document
+    // handlers, whenever focus moves to something OUTSIDE the drawer. Focus into the
+    // drawer's own controls (inside `contentRef`) is left alone.
+    const stopSteal = (e: FocusEvent): void => {
+      const content = contentRef.current
+      if (!content) return
+      const to = e.type === 'focusout' ? (e.relatedTarget as Node | null) : (e.target as Node | null)
+      if (to && !content.contains(to)) e.stopImmediatePropagation()
+    }
+    document.addEventListener('focusin', stopSteal, true)
+    document.addEventListener('focusout', stopSteal, true)
+
+    return () => {
+      styleObserver.disconnect()
+      document.removeEventListener('focusin', stopSteal, true)
+      document.removeEventListener('focusout', stopSteal, true)
+    }
   }, [projectId, raised])
 
   // Reload the current page in the iframe (same-origin, so this just works).
@@ -143,6 +165,7 @@ export function PreviewDrawer({ preview, projects }: Props): React.JSX.Element {
               pointer events when peeked and re-enable only the visible strip, so the
               thread underneath stays fully usable. */}
           <Vaul.Content
+            ref={contentRef}
             className={`fixed inset-x-0 bottom-0 z-40 flex h-full flex-col rounded-t-2xl border-t border-line bg-panel shadow-2xl outline-none ${
               raised ? '' : 'pointer-events-none'
             }`}
