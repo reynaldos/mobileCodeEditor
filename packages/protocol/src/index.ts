@@ -605,3 +605,68 @@ export interface GitRefreshResponse {
   reason?: 'dirty' | 'diverged' | 'no-upstream' | 'error'
   error?: string
 }
+
+// --- Manual git controls (local-only) --------------------------------------
+// Branch switch/create, stash, and a local commit driven from the Source
+// control view. Deliberately no push/pull here beyond the existing ff-only
+// refresh — nothing in this group needs remote credentials.
+
+/** GET /api/projects/:id/git/branches — local branches plus the current one. */
+export interface GitBranchesResponse {
+  /** The checked-out branch (may be a detached-HEAD sha). */
+  current: string
+  /** Local branch names, sorted. */
+  branches: string[]
+}
+
+/** POST /api/projects/:id/git/checkout — switch to `branch`, optionally creating it from HEAD. */
+export interface GitCheckoutRequest {
+  branch: string
+  create?: boolean
+}
+
+/** One entry on the stash stack. */
+export interface GitStashEntry {
+  /** Stack position; 0 is the most recent. */
+  index: number
+  /** The reflog selector, e.g. `stash@{0}`. */
+  ref: string
+  /** The stash's description line. */
+  message: string
+}
+
+/** GET /api/projects/:id/git/stash — the stash stack, newest first. */
+export interface GitStashListResponse {
+  stashes: GitStashEntry[]
+}
+
+/**
+ * POST /api/projects/:id/git/stash — one stash operation.
+ *  - `save`  push the working tree onto the stash (optionally labelled)
+ *  - `pop`   apply an entry and drop it
+ *  - `apply` apply an entry, keeping it on the stack
+ *  - `drop`  discard an entry
+ * `index` selects the entry for pop/apply/drop (default 0, the most recent).
+ */
+export interface GitStashRequest {
+  action: 'save' | 'pop' | 'apply' | 'drop'
+  index?: number
+  message?: string
+}
+
+/**
+ * POST /api/projects/:id/git/commit — stage exactly `paths` and commit them with
+ * `message`. Local only: it never pushes. The client's Source control review
+ * gates this behind a per-file checklist.
+ */
+export interface GitCommitRequest {
+  message: string
+  /** Repo-relative paths to stage and commit (forward-slash, never absolute). */
+  paths: string[]
+}
+
+/** Result of a git write op (checkout/stash/commit). `error` is human-readable on failure. */
+export interface GitOpResponse {
+  ok: boolean
+  error?: string
+}

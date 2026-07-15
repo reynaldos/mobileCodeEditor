@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
-import type { ChangedFile } from '@mce/protocol'
+import type { ChangedFile, GitStashEntry } from '@mce/protocol'
 
 const run = promisify(execFile)
 
@@ -115,6 +115,76 @@ export async function fastForwardToUpstream(cwd: string): Promise<'ok' | 'diverg
   if (!fetched.ok) return 'error'
   const ff = await tryGit(cwd, ['merge', '--ff-only', '@{upstream}'])
   return ff.ok ? 'ok' : 'diverged'
+}
+
+// --- Manual git controls (local-only): branches, stash, commit --------------
+
+/** The current branch (or a short sha in detached HEAD) plus the local branches, sorted. */
+export async function listBranches(cwd: string): Promise<{ current: string; branches: string[] }> {
+  const head = (await git(cwd, ['rev-parse', '--abbrev-ref', 'HEAD'])).trim()
+  // Detached HEAD reports "HEAD"; fall back to a short sha so the UI shows something real.
+  const current = head && head !== 'HEAD' ? head : (await git(cwd, ['rev-parse', '--short', 'HEAD'])).trim()
+  const out = await git(cwd, ['for-each-ref', '--format=%(refname:short)', 'refs/heads'])
+  const branches = out
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .sort((a, b) => a.localeCompare(b))
+  return { current, branches }
+}
+
+/** A branch name git will accept: no spaces, no `..`, no leading `-`, none of git's reserved chars. */
+export function isValidBranchName(name: string): boolean {
+  if (!name || name.length > 255) return false
+  if (name.startsWith('-') || name.startsWith('/') || name.endsWith('/') || name.endsWith('.lock')) return false
+  if (name.includes('..') || name.includes('//') || name.includes('@{')) return false
+  return !/[\s~^:?*[\\\x00-\x1f\x7f]/.test(name)
+}
+
+/** Switch to `branch`, creating it off HEAD when `create`. Fails (not throws) on a git error. */
+export async function checkoutBranch(cwd: string, branch: string, create: boolean): Promise<{ ok: boolean; stderr: string }> {
+  return tryGit(cwd, create ? ['checkout', '-b', branch] : ['checkout', branch])
+}
+
+/** The stash stack, newest first (index 0 is the most recent). */
+export async function listStashes(cwd: string): Promise<GitStashEntry[]> {
+  const out = await git(cwd, ['stash', 'list', '--format=%gd%x09%gs']) // %x09 = TAB
+  const entries: GitStashEntry[] = []
+  for (const line of out.split('\n')) {
+    if (!line.trim()) continue
+    const tab = line.indexOf('\t')
+    const ref = tab === -1 ? line : line.slice(0, tab)
+    const message = tab === -1 ? '' : line.slice(tab + 1)
+    const m = ref.match(/stash@\{(\d+)\}/)
+    entries.push({ index: m ? Number(m[1]) : entries.length, ref, message })
+  }
+  return entries
+}
+
+/** One stash operation. `index` selects the entry for pop/apply/drop. Fails (not throws) on a git error. */
+export async function stashAction(
+  cwd: string,
+  action: 'save' | 'pop' | 'apply' | 'drop',
+  index = 0,
+  message?: string,
+): Promise<{ ok: boolean; stderr: string }> {
+  if (action === 'save') {
+    return tryGit(cwd, message ? ['stash', 'push', '-m', message] : ['stash', 'push'])
+  }
+  return tryGit(cwd, ['stash', action, `stash@{${index}}`])
+}
+
+/**
+ * Stage exactly `paths` and commit them with `message`. `git add` stages
+ * modifications, additions (untracked), and deletions alike; committing with the
+ * same pathspec keeps the commit to just the selected files even if the index
+ * held other staged changes. Local only — never pushes.
+ */
+export async function commitPaths(cwd: string, message: string, paths: string[]): Promise<{ ok: boolean; stderr: string }> {
+  if (paths.length === 0) return { ok: false, stderr: 'No files selected.' }
+  const added = await tryGit(cwd, ['add', '--', ...paths])
+  if (!added.ok) return added
+  return tryGit(cwd, ['commit', '-m', message, '--', ...paths])
 }
 
 /** Before/after text for one file, for the client's unified diff view. */

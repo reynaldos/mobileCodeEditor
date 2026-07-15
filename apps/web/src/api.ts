@@ -10,7 +10,13 @@ import type {
   FsTreeResponse,
   GithubRepo,
   GithubReposResponse,
+  GitBranchesResponse,
+  GitCheckoutRequest,
+  GitCommitRequest,
+  GitOpResponse,
   GitRefreshResponse,
+  GitStashListResponse,
+  GitStashRequest,
   GitStatusResponse,
   ImageRef,
   NameCheckResponse,
@@ -422,3 +428,37 @@ export async function fetchGitStatus(projectId: string): Promise<GitStatusRespon
 export async function refreshBranch(projectId: string): Promise<GitRefreshResponse> {
   return (await post<GitRefreshResponse>(`/api/projects/${encodeURIComponent(projectId)}/git/refresh`, {}))!
 }
+
+const gitUrl = (projectId: string, sub: string): string =>
+  `${BASE}/api/projects/${encodeURIComponent(projectId)}/git/${sub}`
+
+/** Local branches plus the current one, for the branch switcher. */
+export async function fetchBranches(projectId: string): Promise<GitBranchesResponse> {
+  const response = await fetch(gitUrl(projectId, 'branches'))
+  if (!response.ok) throw new ApiError(response.status, response.statusText)
+  return (await response.json()) as GitBranchesResponse
+}
+
+/** Switch to (or create) a branch. `ok:false` carries a git error message. */
+export async function checkoutBranch(projectId: string, branch: string, create = false): Promise<GitOpResponse> {
+  return (await post<GitOpResponse>(gitPath(projectId, 'checkout'), { branch, create } satisfies GitCheckoutRequest))!
+}
+
+/** The stash stack, newest first. */
+export async function fetchStashes(projectId: string): Promise<GitStashListResponse> {
+  const response = await fetch(gitUrl(projectId, 'stash'))
+  if (!response.ok) throw new ApiError(response.status, response.statusText)
+  return (await response.json()) as GitStashListResponse
+}
+
+/** Run one stash operation (save/pop/apply/drop). `ok:false` carries a git error message. */
+export async function stashOp(projectId: string, req: GitStashRequest): Promise<GitOpResponse> {
+  return (await post<GitOpResponse>(gitPath(projectId, 'stash'), req))!
+}
+
+/** Stage the given paths and commit them locally (never pushes). `ok:false` carries a git error message. */
+export async function commitFiles(projectId: string, message: string, paths: string[]): Promise<GitOpResponse> {
+  return (await post<GitOpResponse>(gitPath(projectId, 'commit'), { message, paths } satisfies GitCommitRequest))!
+}
+
+const gitPath = (projectId: string, sub: string): string => `/api/projects/${encodeURIComponent(projectId)}/git/${sub}`

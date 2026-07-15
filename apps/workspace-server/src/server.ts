@@ -24,6 +24,7 @@ import { registerEnv } from './routes/env.ts'
 import { registerEvents } from './routes/events.ts'
 import { registerFs } from './routes/fs.ts'
 import { registerGithub } from './routes/github.ts'
+import { registerGitOps } from './routes/git-ops.ts'
 import { registerGitRefresh } from './routes/git-refresh.ts'
 import { registerGitStatus } from './routes/git-status.ts'
 import { registerPresence } from './routes/presence.ts'
@@ -277,6 +278,7 @@ export async function buildServer(config: Config, services: Services): Promise<F
   registerFs(app, projects)
   registerGitStatus(app, projects)
   registerGitRefresh(app, projects)
+  registerGitOps(app, projects)
   registerEnv(app, projects)
   registerThreads(app, log, projects, sessions)
   registerGithub(app, projects, github)
