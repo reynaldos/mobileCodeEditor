@@ -222,9 +222,9 @@ export function SourceControlView({ projectId, onOpenFile, onGitChange }: Props)
   if (!status) return <p className="p-4 text-center text-[13px] text-muted">Loading…</p>
 
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto">
+    <div className="flex min-h-0 flex-1 flex-col">
       {opError && (
-        <p className="flex items-start gap-1.5 border-b border-line bg-del/10 px-4 py-2 text-[12px] text-del">
+        <p className="flex shrink-0 items-start gap-1.5 border-b border-line bg-del/10 px-4 py-2 text-[12px] text-del">
           <AlertTriangle className="mt-px size-3.5 shrink-0" />
           <span>{opError}</span>
         </p>
@@ -251,7 +251,7 @@ export function SourceControlView({ projectId, onOpenFile, onGitChange }: Props)
       >
         {dirty ? (
           <>
-            <div className="flex items-center gap-2 border-b border-line bg-panel-2/40 px-3 py-2">
+            <div className="flex shrink-0 items-center gap-2 border-b border-line bg-panel-2/40 px-3 py-2">
               <CheckBox
                 state={allSelected ? 'on' : selected.size > 0 ? 'mixed' : 'off'}
                 onClick={toggleAll}
@@ -286,7 +286,7 @@ export function SourceControlView({ projectId, onOpenFile, onGitChange }: Props)
               />
             </div>
 
-            <ul className="flex flex-col">
+            <ul className="flex min-h-0 flex-1 flex-col overflow-y-auto">
               {files.map((f) => (
                 <ChangedFileRow
                   key={f.path}
@@ -310,7 +310,7 @@ export function SourceControlView({ projectId, onOpenFile, onGitChange }: Props)
               ))}
             </ul>
 
-            <div className="flex flex-col gap-2 p-3">
+            <div className="flex shrink-0 flex-col gap-2 border-t border-line p-3">
               <textarea
                 className="min-h-16 w-full resize-y rounded-lg border border-line bg-panel-2 px-3 py-2 text-[13px] text-fg outline-none focus:border-accent"
                 placeholder="Commit message"
@@ -329,7 +329,9 @@ export function SourceControlView({ projectId, onOpenFile, onGitChange }: Props)
             </div>
           </>
         ) : (
-          <p className="px-4 py-4 text-center text-[13px] text-muted">{notice ?? 'No changes.'}</p>
+          <p className="flex flex-1 items-center justify-center px-4 py-4 text-center text-[13px] text-muted">
+            {notice ?? 'No changes.'}
+          </p>
         )}
       </Section>
 
@@ -454,8 +456,10 @@ function Section({
   children: React.ReactNode
 }): React.JSX.Element {
   return (
-    <div className="border-b border-line">
-      <button className="flex w-full items-center gap-2 px-3 py-2.5 text-left hover:bg-panel-2" onClick={onToggle}>
+    // Open: grow to fill and let the body scroll internally (min-h-0 flex-1).
+    // Closed: just the head, at its natural height.
+    <div className={`flex flex-col border-b border-line ${open ? 'min-h-0 flex-1' : 'shrink-0'}`}>
+      <button className="flex w-full shrink-0 items-center gap-2 px-3 py-2.5 text-left hover:bg-panel-2" onClick={onToggle}>
         <ChevronRight className={`size-3.5 shrink-0 text-muted transition-transform ${open ? 'rotate-90' : ''}`} />
         <Icon className="size-4 shrink-0 text-muted" />
         <span className="shrink-0 text-[13px] font-semibold text-fg">{title}</span>
@@ -463,7 +467,7 @@ function Section({
           <span className={`ml-auto flex min-w-0 items-center justify-end ${summaryClassName ?? ''}`}>{summary}</span>
         )}
       </button>
-      {open && <div>{children}</div>}
+      {open && <div className="flex min-h-0 flex-1 flex-col">{children}</div>}
     </div>
   )
 }
@@ -510,7 +514,7 @@ function BranchList({
   if (!branches) return <p className="px-4 py-3 text-[12px] text-muted">Loading branches…</p>
 
   return (
-    <div className="flex flex-col gap-1 p-2">
+    <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto p-2">
       <ul className="flex flex-col gap-1">
         {branches.branches.map((b) => {
           const current = b === branches.current
@@ -593,10 +597,14 @@ function StashBody({
   onAction: (action: 'pop' | 'apply' | 'drop', index: number) => void
 }): React.JSX.Element {
   if (stashes.length === 0) {
-    return <p className="px-3 py-3 text-[12px] text-muted">No stashes. Stash changes from the Changes menu.</p>
+    return (
+      <p className="flex flex-1 items-center justify-center px-3 py-3 text-center text-[12px] text-muted">
+        No stashes. Stash changes from the Changes menu.
+      </p>
+    )
   }
   return (
-    <ul className="flex flex-col p-2">
+    <ul className="flex min-h-0 flex-1 flex-col overflow-y-auto p-2">
       {stashes.map((s) => (
         <li key={s.ref} className="group flex items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-panel-2">
           <span className="min-w-0 flex-1 truncate text-[12px] text-muted">{s.message}</span>
@@ -657,7 +665,7 @@ function BranchSync({
         : `Up to date with ${upstream.name}`
 
   return (
-    <div className="border-t border-line px-3 py-2.5">
+    <div className="shrink-0 border-t border-line px-3 py-2.5">
       <div className="flex items-center gap-2">
         <RotateCw className={`size-3.5 shrink-0 text-muted ${refreshing ? 'animate-spin' : ''}`} />
         <span className={`min-w-0 flex-1 truncate text-[12px] ${behind > 0 ? 'text-warn' : 'text-muted'}`}>{summary}</span>
