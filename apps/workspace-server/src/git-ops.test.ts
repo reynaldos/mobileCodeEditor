@@ -11,6 +11,7 @@ import {
   isValidBranchName,
   listBranches,
   listStashes,
+  pushCurrent,
   stashAction,
 } from './git-changes.ts'
 
@@ -106,6 +107,13 @@ test('discardPaths restores a modified file and removes an untracked one, leavin
 test('discardPaths refuses an empty selection', async () => {
   const dir = makeRepo()
   assert.equal((await discardPaths(dir, [])).ok, false)
+})
+
+test('pushCurrent reports noUpstream for a branch that tracks no remote', async () => {
+  const dir = makeRepo() // a fresh local repo has no upstream
+  const r = await pushCurrent(dir)
+  assert.equal(r.ok, false)
+  assert.equal(r.noUpstream, true)
 })
 
 test('stash save/list/pop round-trips', async () => {

@@ -188,6 +188,18 @@ export async function commitPaths(cwd: string, message: string, paths: string[])
 }
 
 /**
+ * Push the current branch to its upstream. Best-effort follow-on to a commit:
+ * needs an upstream (returns `noUpstream` if the branch tracks no remote) and
+ * network, so it's reported separately and a failure never undoes the commit.
+ */
+export async function pushCurrent(cwd: string): Promise<{ ok: boolean; stderr: string; noUpstream?: boolean }> {
+  const upstream = await upstreamStatus(cwd)
+  if (!upstream) return { ok: false, stderr: '', noUpstream: true }
+  const r = await tryGit(cwd, ['push'], 30_000)
+  return { ok: r.ok, stderr: r.stderr }
+}
+
+/**
  * Discard working-tree changes for `paths`, restoring each to HEAD. Per path
  * (so one untracked file can't abort the whole batch): unstage, then either
  * `checkout HEAD` for a tracked file or `clean` for an untracked one. Verifies

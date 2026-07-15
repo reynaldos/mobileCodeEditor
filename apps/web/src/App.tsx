@@ -1,7 +1,7 @@
 import { LEGACY_THREAD_ID } from '@mce/protocol'
 import { ChevronDown, Files, GitBranch, History, KeyRound, MessageCirclePlus, MonitorPlay } from 'lucide-react'
 import { lazy, Suspense, useCallback, useEffect, useState } from 'react'
-import { deleteThread, fetchHealth, type Health, renameThread } from './api.ts'
+import { deleteThread, fetchHealth, type Health, renameThread, sendPrompt } from './api.ts'
 import { ActionsMenu } from './components/ActionsMenu.tsx'
 import { BuildModal } from './components/BuildModal.tsx'
 import { EnvDrawer } from './components/EnvDrawer.tsx'
@@ -307,6 +307,14 @@ export function App(): React.JSX.Element {
             open={explorerOpen}
             onOpenChange={setExplorerOpen}
             onGitChange={() => void projectsState.refresh()}
+            onCommitted={(summary) => {
+              // Tell the agent the commit happened — but only when Source control is
+              // open for the project whose conversation is on screen, and that
+              // thread is a live one (not the read-only legacy bucket).
+              if (explorerProjectId && explorerProjectId === activeProjectId && activeThreadId && !isLegacy) {
+                void sendPrompt(summary, explorerProjectId, activeThreadId).catch(() => undefined)
+              }
+            }}
           />
         </Suspense>
       )}

@@ -10,7 +10,7 @@ import type { Config } from './config.ts'
 import { openDb } from './db.ts'
 import { EventLog } from './log.ts'
 import { makeRedactor } from './redact.ts'
-import { AgentSession, type QueryFn } from './session.ts'
+import { AgentSession, isGitCommitOrPush, type QueryFn } from './session.ts'
 import { UnknownImageError, UploadStore } from './uploads.ts'
 
 /**
@@ -306,6 +306,54 @@ test('planning tools (TodoWrite/Task*) are auto-approved and never raise a card'
   await waitFor(() => session.status === 'awaiting_input', 'turn to finish')
 
   assert.ok(!types(log).includes('approval_request'), 'planning tools must not prompt')
+  await session.stop()
+})
+
+test('isGitCommitOrPush matches real commit/push invocations, not lookalikes', () => {
+  for (const cmd of [
+    'git commit -m "x"',
+    'git push',
+    'git push origin main',
+    'git add -A && git commit -m "x"',
+    'git add . && git commit -am "y" && git push',
+    'git -C /repo commit -m "z"',
+    'git --no-pager push --force',
+  ]) {
+    assert.equal(isGitCommitOrPush(cmd), true, cmd)
+  }
+  for (const cmd of [
+    'git status',
+    'git add -A',
+    'git log --oneline',
+    'git log --grep=commit',
+    'git diff HEAD',
+    'echo "commit"',
+    'npm run push', // not a git push
+  ]) {
+    assert.equal(isGitCommitOrPush(cmd), false, cmd)
+  }
+})
+
+test('the agent is denied git commit and git push (they go through the app)', async () => {
+  const seen: { commit?: PermissionResult | null; push?: PermissionResult | null } = {}
+  const { session } = makeSession(
+    fakeQuery(async function* ({ prompt, options }) {
+      yield init()
+      for await (const _ of prompt) {
+        const signal = new AbortController().signal
+        seen.commit = await options.canUseTool!('Bash', { command: 'git commit -m "x"' }, { toolUseID: 'c', signal })
+        seen.push = await options.canUseTool!('Bash', { command: 'git push' }, { toolUseID: 'p', signal })
+        yield done()
+      }
+    }),
+  )
+
+  session.start()
+  session.prompt('go')
+  await waitFor(() => session.status === 'awaiting_input', 'turn to finish')
+
+  assert.equal(seen.commit?.behavior, 'deny')
+  assert.equal(seen.push?.behavior, 'deny')
   await session.stop()
 })
 

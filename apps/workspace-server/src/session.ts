@@ -339,6 +339,19 @@ export class AgentSession {
    * blocked indefinitely, with no error and no timeout.
    */
   readonly #canUseTool: CanUseTool = async (toolName, input, options) => {
+    // Committing and pushing are the user's job, done from the app's Source
+    // control tab — the agent never does them itself. Deny outright, ahead of
+    // any allowlist or standing rule so it can't be bypassed. The message steers
+    // the agent to leave its work in the working tree for review.
+    if (toolName === 'Bash' && isGitCommitOrPush(String((input as { command?: unknown }).command ?? ''))) {
+      return {
+        behavior: 'deny',
+        message:
+          'git commit and git push are disabled for the agent — the user reviews and commits changes from the app’s Source control tab. Do not commit or push; leave all changes in the working tree.',
+        toolUseID: options.toolUseID,
+      }
+    }
+
     // Built-in read-only allowlist, side-effect-free planning tools, plus the
     // user's own standing rules from "Always approve" (projected from the log,
     // per project). None of these should ever surface an approval card.
@@ -580,6 +593,20 @@ export class AgentSession {
 const SUBCOMMANDED = new Set([
   'git', 'gh', 'npm', 'pnpm', 'yarn', 'bun', 'npx', 'docker', 'cargo', 'go', 'kubectl', 'fly', 'pip', 'make', 'brew',
 ])
+
+/**
+ * Whether a shell command invokes `git commit` or `git push` — used to deny the
+ * agent from committing/pushing (that's the user's job, from the Source control
+ * tab). Handles chained commands (`git add -A && git commit -m x && git push`)
+ * and flags before the subcommand (`git -C dir commit`): the regex engine finds
+ * any `git … commit|push` run, and `[^\s&|;]+` never crosses a `&& / || / ; / |`
+ * boundary, so it only matches a real git invocation of that subcommand — not
+ * `git log --grep=commit`. `git commit-tree`/`git push --dry-run` also match,
+ * which is the safe direction (better to over-block than let a commit slip).
+ */
+export function isGitCommitOrPush(command: string): boolean {
+  return /\bgit\s+(?:[^\s&|;]+\s+)*?(?:commit|push)\b/.test(command)
+}
 
 function commandOf(input: Record<string, unknown>): string | undefined {
   return typeof input.command === 'string' ? input.command : undefined

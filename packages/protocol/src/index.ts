@@ -675,8 +675,27 @@ export interface GitDiscardRequest {
   paths: string[]
 }
 
-/** Result of a git write op (checkout/stash/commit/discard). `error` is human-readable on failure. */
+/** Result of a git write op (checkout/stash/discard). `error` is human-readable on failure. */
 export interface GitOpResponse {
   ok: boolean
   error?: string
+}
+
+/**
+ * POST /api/projects/:id/git/commit result. The commit landed iff `ok`; the push
+ * is reported separately because it's a best-effort follow-on (needs an upstream
+ * and network) and a push failure never undoes the commit.
+ */
+export interface GitCommitResponse {
+  ok: boolean
+  /** Commit error (nothing was committed). */
+  error?: string
+  /** Pushed to the branch's upstream. */
+  pushed?: boolean
+  /** No upstream to push to — the commit is local only. */
+  pushSkipped?: boolean
+  /** The push was attempted and failed; the commit still landed locally. */
+  pushError?: string
+  /** Current branch, for the confirmation/notification message. */
+  branch?: string
 }

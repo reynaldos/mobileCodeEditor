@@ -6,13 +6,22 @@ where the FS/exec RPC surface gets built — the same surface Terminal (Phase 4)
 
 Branch: `phase-3/file-browser-editor`.
 
-**Status — ✅ built (read-only), on-device verification pending.** The design calls below were
+**Status — ✅ built, on-device verification pending.** The design calls below were
 confirmed and shipped; the FS/exec RPC surface, the `ExplorerDrawer`, tree, read-only editor,
 and Source control view all exist. Since v1 the phase also grew a rendered **markdown preview**,
 a per-file **Copy path / Open preview** kebab, and **`@file` reference highlighting** in the
 prompt box — all captured in [As built](#as-built--what-actually-shipped) at the end of this
-doc. What's still deferred: file editing (write + Save), which stays the second pass, and every
-git write op (Phase 6). The design-call sections below are kept as the record of *why* each
+doc. What's still deferred: file editing (write + Save), which stays the second pass.
+
+**Update — Source control is no longer read-only.** The read-only slice below (design call 4)
+was the starting point; the tab has since pulled the Git-UI half of Phase 6 forward. It now has
+three accordions — **Changes** (a file-by-file commit review: per-file checkboxes + select-all
+gate a **Commit & push** button that runs `git commit` + a best-effort `git push`, plus per-file
+and bulk **discard**, and a **View file** kebab), **Branches** (switch/create), and **Stash**
+(save/pop/apply/drop). The agent is now **denied `git commit`/`git push`** — committing is the
+user's job here (see [DECISIONS #23](DECISIONS.md)). Endpoints live in `routes/git-ops.ts`
+(`branches`/`checkout`/`stash`/`commit`/`discard`) alongside the original `git/status` and
+`git/refresh`. The design-call sections below are kept as the record of *why* each original
 shape was chosen; read them as past tense.
 
 ---
@@ -322,20 +331,22 @@ feeds `DiffView`. Client side, with two deltas from the sketch worth noting:
 
 ### Proper source control — the deliberate next step
 
-The branch Refresh above is a stopgap, not the real thing. What it explicitly does **not** do,
-and what a proper pass (Phase 6-shaped) should cover:
+The branch Refresh above was a stopgap; most of the "proper pass" has since shipped (see the
+**Update** at the top of this doc) — the commit review, branch switch/create, stash, and discard
+all landed in `routes/git-ops.ts`, and committing/pushing is user-only ([DECISIONS #23](DECISIONS.md)).
+What's still genuinely open:
 
 - **Fetch cadence.** `git/status` doesn't fetch, so `behind` reflects the last fetch until you
   hit Refresh. Proper handling wants a background/periodic fetch (or a push-based signal) so
   "out of sync" is known without a manual poke.
 - **Divergence.** A diverged branch is refused today. Real handling = an explicit merge vs.
   rebase choice, and conflict resolution UI.
-- **Stash/commit integration.** The dirty guard just tells you to commit or stash elsewhere;
-  there's no stash/commit affordance here yet.
-- **Stage / commit / push** proper — still Phase 6, on the same RPC surface.
+- **Push credentials.** Push is best-effort and assumes the container already has git
+  credentials; there's no in-app auth/setup flow for it yet.
 
-### Still deferred (unchanged)
+### Still deferred
 
-Editing (write + Save + `file_saved`), and all git *write* operations beyond the ff-only branch
-refresh — stage/commit/push/discard/stash/merge — stay Phase 6. See [Deferred
+Editing (write + Save + `file_saved`), and the git operations still marked open above —
+periodic fetch, merge/rebase, and conflict resolution. Commit, push, discard, stash, and
+branch switch/create have shipped (see the top-of-doc **Update**). See [Deferred
 deliberately](#deferred-deliberately) above.

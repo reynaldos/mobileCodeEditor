@@ -1,6 +1,7 @@
 import type {
   ChangedFile,
   GitBranchesResponse,
+  GitCommitResponse,
   GitRefreshResponse,
   GitStashEntry,
   GitStatusResponse,
@@ -44,6 +45,8 @@ interface Props {
   /** Fired after a git op that can change the project's branch/commit state, so the
    *  header + drawer branch subtitle (read from the project list) refetch. */
   onGitChange?: () => void
+  /** Fired after a successful commit with a human summary, to notify the thread's agent that the user committed. */
+  onCommitted?: (summary: string) => void
 }
 
 type SectionId = 'changes' | 'branches' | 'stash'
@@ -55,7 +58,7 @@ type SectionId = 'changes' | 'branches' | 'stash'
  * switches/creates; Stash saves/pops. Everything is local-only: nothing here
  * reaches a remote, so no operation needs credentials.
  */
-export function SourceControlView({ projectId, onOpenFile, onGitChange }: Props): React.JSX.Element {
+export function SourceControlView({ projectId, onOpenFile, onGitChange, onCommitted }: Props): React.JSX.Element {
   const [status, setStatus] = useState<GitStatusResponse | null>(null)
   const [error, setError] = useState(false)
   const [branches, setBranches] = useState<GitBranchesResponse | null>(null)
@@ -155,15 +158,33 @@ export function SourceControlView({ projectId, onOpenFile, onGitChange }: Props)
 
   async function onCommit(): Promise<void> {
     const paths = [...selected]
-    const ok = await runOp(
-      () => commitFiles(projectId, message.trim(), paths),
-      async () => {
-        setMessage('')
-        await Promise.all([loadStatus(), loadBranches()])
-        onGitChange?.() // ahead/behind moved — refresh the header's branch subtitle
-      },
-    )
-    if (ok) setNotice(`Committed ${paths.length} file${paths.length === 1 ? '' : 's'}.`)
+    const msg = message.trim()
+    setBusy(true)
+    setOpError(null)
+    try {
+      const res = await commitFiles(projectId, msg, paths)
+      if (!res.ok) {
+        setOpError(res.error ?? 'Commit failed.')
+        return
+      }
+      setMessage('')
+      setSelected(new Set())
+      await Promise.all([loadStatus(), loadBranches()])
+      onGitChange?.() // branch ahead/behind moved — refresh the header's branch subtitle
+      const pushNote = res.pushed
+        ? ` and pushed to ${res.branch ?? 'the remote'}`
+        : res.pushSkipped
+          ? ' (no remote — local only)'
+          : res.pushError
+            ? ` — push failed: ${res.pushError}`
+            : ''
+      setNotice(`Committed ${paths.length} file${paths.length === 1 ? '' : 's'}${pushNote}.`)
+      onCommitted?.(commitSummary(msg, paths, res)) // let the thread's agent know it was done
+    } catch {
+      setOpError('Could not reach the server.')
+    } finally {
+      setBusy(false)
+    }
   }
 
   async function onCheckout(branch: string, create: boolean): Promise<void> {
@@ -323,9 +344,13 @@ export function SourceControlView({ projectId, onOpenFile, onGitChange }: Props)
                 onClick={() => void onCommit()}
               >
                 {busy ? <Loader className="size-4 animate-spin" /> : null}
-                {allSelected ? `Commit ${files.length} file${files.length === 1 ? '' : 's'}` : 'Review every file to commit'}
+                {allSelected
+                  ? `Commit & push ${files.length} file${files.length === 1 ? '' : 's'}`
+                  : 'Review every file to commit'}
               </button>
-              <p className="text-center text-[11px] text-muted">Commits locally — push isn’t wired yet.</p>
+              <p className="text-center text-[11px] text-muted">
+                Commits the reviewed files and pushes to the branch’s remote, then tells the agent it’s done.
+              </p>
             </div>
           </>
         ) : (
@@ -697,6 +722,19 @@ const STATUS_COLOR: Record<ChangedFile['status'], string> = {
 }
 
 const sumFiles = (files: ChangedFile[], key: 'additions' | 'deletions'): number => files.reduce((n, f) => n + f[key], 0)
+
+/** The message sent to the thread's agent after the user commits from Source control. */
+function commitSummary(message: string, paths: string[], res: GitCommitResponse): string {
+  const action = res.pushed
+    ? `committed and pushed to \`${res.branch ?? 'the current branch'}\``
+    : 'committed (local only — not pushed)'
+  const list = paths.length <= 8 ? paths.join(', ') : `${paths.slice(0, 8).join(', ')}, +${paths.length - 8} more`
+  const pushWarn = res.pushError ? ` The push failed (${res.pushError}), so the commit is local for now.` : ''
+  return (
+    `[Source control] I ${action} ${paths.length} file${paths.length === 1 ? '' : 's'} with message: "${message}". ` +
+    `Files: ${list}. The working tree is clean now — you don't need to commit or push (that's handled here).${pushWarn}`
+  )
+}
 
 function ChangedFileRow({
   projectId,

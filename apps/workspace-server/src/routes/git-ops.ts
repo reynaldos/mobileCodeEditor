@@ -2,6 +2,7 @@ import type {
   GitBranchesResponse,
   GitCheckoutRequest,
   GitCommitRequest,
+  GitCommitResponse,
   GitDiscardRequest,
   GitOpResponse,
   GitStashListResponse,
@@ -15,6 +16,7 @@ import {
   isValidBranchName,
   listBranches,
   listStashes,
+  pushCurrent,
   stashAction,
 } from '../git-changes.ts'
 import type { ProjectStore } from '../projects.ts'
@@ -91,15 +93,26 @@ export function registerGitOps(app: FastifyInstance, projects: ProjectStore): vo
 
     const { message, paths } = (request.body ?? {}) as GitCommitRequest
     if (typeof message !== 'string' || !message.trim()) {
-      return reply.send({ ok: false, error: 'A commit message is required.' } satisfies GitOpResponse)
+      return reply.send({ ok: false, error: 'A commit message is required.' } satisfies GitCommitResponse)
     }
     if (!Array.isArray(paths) || paths.length === 0) {
-      return reply.send({ ok: false, error: 'Select at least one file to commit.' } satisfies GitOpResponse)
+      return reply.send({ ok: false, error: 'Select at least one file to commit.' } satisfies GitCommitResponse)
     }
-    if (!safePaths(paths)) return reply.send({ ok: false, error: 'Invalid file path.' } satisfies GitOpResponse)
+    if (!safePaths(paths)) return reply.send({ ok: false, error: 'Invalid file path.' } satisfies GitCommitResponse)
 
-    const result = await commitPaths(cwd, message, paths)
-    return reply.send({ ok: result.ok, ...(result.ok ? {} : { error: cleanGitError(result.stderr) }) } satisfies GitOpResponse)
+    const committed = await commitPaths(cwd, message, paths)
+    if (!committed.ok) return reply.send({ ok: false, error: cleanGitError(committed.stderr) } satisfies GitCommitResponse)
+
+    // Push is a best-effort follow-on — a failure (or no upstream) leaves the
+    // commit in place and is reported separately so the client can say so.
+    const { current } = await listBranches(cwd)
+    const push = await pushCurrent(cwd)
+    const pushResult = push.noUpstream
+      ? { pushSkipped: true }
+      : push.ok
+        ? { pushed: true }
+        : { pushError: cleanGitError(push.stderr) }
+    return reply.send({ ok: true, branch: current, ...pushResult } satisfies GitCommitResponse)
   })
 
   app.post('/api/projects/:projectId/git/discard', async (request, reply) => {

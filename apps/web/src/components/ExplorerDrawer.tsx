@@ -21,6 +21,8 @@ interface Props {
   onOpenChange: (open: boolean) => void
   /** A git op in Source control changed the branch/commit state — refetch the project list so the branch subtitle stays live. */
   onGitChange?: () => void
+  /** The user committed from Source control — notify the thread's agent with this summary. */
+  onCommitted?: (summary: string) => void
 }
 
 /**
@@ -35,7 +37,7 @@ interface Props {
  * the active file's name once one's open. Right is the existing
  * `ActionsMenu` kebab, reused as-is.
  */
-export function ExplorerDrawer({ projectId, projectName, branch, initialView, initialFile, open, onOpenChange, onGitChange }: Props): React.JSX.Element {
+export function ExplorerDrawer({ projectId, projectName, branch, initialView, initialFile, open, onOpenChange, onGitChange, onCommitted }: Props): React.JSX.Element {
   const [view, setView] = useState<View>(initialView)
   const [refreshKey, setRefreshKey] = useState(0)
   const tabs = useOpenFiles()
@@ -117,6 +119,7 @@ export function ExplorerDrawer({ projectId, projectName, branch, initialView, in
               projectId={projectId}
               onOpenFile={openFile}
               onGitChange={onGitChange}
+              onCommitted={onCommitted}
             />
           )}
           <FileEditor projectId={projectId} tabs={tabs} hidden={view !== 'file'} />

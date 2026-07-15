@@ -219,7 +219,9 @@ type PermissionResult =
   | { behavior: 'deny';  message: string; interrupt?: boolean }
 ```
 
-Auto-approve `Read`, `Grep`, `Glob`. Prompt on everything else, Bash included.
+Auto-approve `Read`, `Grep`, `Glob`, and the side-effect-free planning tools (`TodoWrite`,
+`Task*`). **Deny** `git commit` / `git push` outright — those go through the Source control tab
+(DECISIONS #23). Prompt on everything else, Bash included.
 
 > **Never return `null`.** The SDK reads it as "the consumer already answered out of band"
 > and writes no control response. The tool then blocks **indefinitely** — permission
@@ -317,7 +319,8 @@ Where the system bends, in the order you'll bend it.
 | Change | Cost | Why |
 |---|---|---|
 | More devices | none | Tailscale |
-| Git push, Vercel deploy, scaffolding | none | Claude already does these via Bash |
+| Commit / push | done | user-driven from the Source control tab; the agent is denied `git commit`/`git push` (DECISIONS #23) |
+| Vercel deploy, scaffolding | none | Claude already does these via Bash |
 | Many projects, one container | small | `project_id` column exists; a picker screen |
 | Many concurrent sessions | small | `AgentSession` is already a class |
 | Many containers | **real** | Needs the control plane. See below. |

@@ -13,6 +13,7 @@ import type {
   GitBranchesResponse,
   GitCheckoutRequest,
   GitCommitRequest,
+  GitCommitResponse,
   GitDiscardRequest,
   GitOpResponse,
   GitRefreshResponse,
@@ -457,9 +458,9 @@ export async function stashOp(projectId: string, req: GitStashRequest): Promise<
   return (await post<GitOpResponse>(gitPath(projectId, 'stash'), req))!
 }
 
-/** Stage the given paths and commit them locally (never pushes). `ok:false` carries a git error message. */
-export async function commitFiles(projectId: string, message: string, paths: string[]): Promise<GitOpResponse> {
-  return (await post<GitOpResponse>(gitPath(projectId, 'commit'), { message, paths } satisfies GitCommitRequest))!
+/** Stage + commit the given paths, then push to the branch's upstream (best-effort — see `GitCommitResponse`). */
+export async function commitFiles(projectId: string, message: string, paths: string[]): Promise<GitCommitResponse> {
+  return (await post<GitCommitResponse>(gitPath(projectId, 'commit'), { message, paths } satisfies GitCommitRequest))!
 }
 
 /** Discard working-tree changes for the given paths (restore to HEAD). Destructive. `ok:false` carries a git error message. */

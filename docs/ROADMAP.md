@@ -213,7 +213,10 @@ ripgrep-backed `FileTree`, a read-only CodeMirror 6 viewer with an 8-tab LRU str
 that opens as its own read-only `(Preview)` tab (react-markdown + GFM + sanitized raw HTML), a
 per-file kebab (**Copy path** as an `@`-reference, **Open preview** for markdown), and `@file`
 reference highlighting in the prompt box. Editing (write + Save) is still the deliberate second
-pass; Source control stays read-only (stage/commit/push is Phase 6).
+pass. **Source control has since grown past read-only** (that slice of Phase 6 was pulled
+forward): branch switch/create, stash, per-file **discard**, and a **commit review** — file
+checkboxes gate a **Commit & push** button, and the agent is now blocked from committing/pushing
+itself (see [DECISIONS #23](DECISIONS.md), and the accordion below plus multi-select file copy).
 
 File browser with ripgrep-backed search. CodeMirror 6, read-only first, then editable.
 
@@ -261,6 +264,12 @@ particular is `vercel link` and `vercel deploy` with a token in `/config` — an
 whenever you feel like it.
 
 Order them by what you actually reach for. You won't be able to predict it now.
+
+**Git UI has largely landed early** (in the Phase 3 Source control tab): branch switch/create,
+stash save/pop/apply/drop, per-file discard, and a file-by-file commit review that runs
+`git commit` + a best-effort `git push`. It went further than "buttons over commands Claude can
+run" — commit/push are now *only* reachable from the UI; the agent is denied both (see
+[DECISIONS #23](DECISIONS.md)). What's still open here: project settings page and Vercel deploy.
 
 ---
 

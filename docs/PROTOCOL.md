@@ -134,13 +134,20 @@ What we see, and what we do with it:
 | Tool | Behavior |
 |---|---|
 | `Read`, `Grep`, `Glob` | auto-approve, emit `tool_use` chip |
+| `TodoWrite`, `TaskCreate` / `TaskUpdate` / `TaskList` | auto-approve — side-effect-free planning that drives the live task-list card; never a card |
 | `Bash`, read-only (`ls`, `grep`, `pwd`) | never reaches us — runs, emits a chip |
-| `Bash`, mutating (`touch`, `rm`, `git push`) | `approval_request` → command card |
+| `Bash`, `git commit` / `git push` | **denied** — committing/pushing is the user's job, from the Source control tab (see DECISIONS #23) |
+| `Bash`, other mutating (`touch`, `rm`) | `approval_request` → command card |
 | `Edit`, `Write` | `approval_request` → diff card |
 | everything else | `approval_request` |
 
 Verified, not assumed: in a real session `pwd && ls` and two `grep`s ran with no card, while
 a probe confirmed `touch probe.txt` raised one and left the file uncreated.
+
+Two refinements since: the planning tools (`TodoWrite` and the `Task*` family) are auto-approved
+too — gating them behind a card was blocking the live task-list card from ever rendering — and
+`git commit` / `git push` are **denied outright** for the agent, ahead of any allowlist, because
+committing runs through the app's Source control tab now (DECISIONS #23).
 
 A tool call that fails validation errors *before* the permission check — an `Edit` on a file
 Claude hasn't read yet returns `tool_result ok=false` with no `approval_request`. That is not

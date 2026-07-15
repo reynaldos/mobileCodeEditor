@@ -161,6 +161,13 @@ that mattered: the card is a review surface, so never reach for `bypassPermissio
 A mutating Bash command stops and asks; a read-only one doesn't. That is the behavior you
 want — a card for every `ls` would bury the cards that matter.
 
+**Two later refinements to the allowlist.** `AUTO_APPROVED` grew a sibling, `PLANNING_TOOLS`
+(`TodoWrite`, `TaskCreate`/`TaskUpdate`/`TaskList`): side-effect-free bookkeeping that drives the
+live task-list card. Gating those behind a card was a real bug — every checklist update raised a
+"Claude wants to use TodoWrite" prompt, so the model reverted to prose plans and the card rarely
+rendered. And the opposite move at the other end: `git commit` / `git push` are now **denied**
+outright, ahead of the allowlist, because committing is the user's job now (see #23).
+
 ---
 
 ## 9. Approval cards live inline in the conversation
@@ -467,3 +474,29 @@ marker — those are text, not icons. The rule is about icon/affordance glyphs.
 
 **Would change our mind:** nothing foreseeable. If an icon is missing from lucide,
 add an inline SVG that follows the same `currentColor` + size conventions.
+
+---
+
+## 23. The agent does not commit — the user commits from the app
+
+The agent is **denied `git commit` and `git push`** (in `#canUseTool`, ahead of every allowlist
+and standing rule, so it can't be bypassed). It's told to leave its work in the working tree.
+Committing and pushing happen in the app's **Source control tab**: you review each changed file
+with a checkbox, the Commit & push button unlocks only once every file is reviewed, and pressing
+it runs `git commit` then a best-effort `git push` server-side (`routes/git-ops.ts`).
+
+This is the same instinct as #8 — *the review surface is the UI, not a rubber stamp* — carried
+one step further. An approval card for a `git commit` reviews the **command**; it can't show you
+the actual per-file diff you're about to enshrine in history. The Source control review does,
+and it makes "what gets committed" an explicit, file-by-file decision instead of a wall of text
+in a Bash card. Pushing is the user's call for the same reason it always was — it's outward-facing
+and hard to reverse, so it should be a deliberate button press, never a thing the agent does mid-turn.
+
+After a successful commit the app sends the thread a short summary prompt ("[Source control] I
+committed and pushed N files…"), so the agent knows the work landed and continues from a clean
+tree rather than trying to commit again. Push stays best-effort: no upstream → local-only; a push
+failure leaves the commit in place and says so, both in the UI and in the note to the agent.
+
+**Would change our mind:** if a genuinely headless flow needs the agent to commit (a scheduled
+job with no human at the review surface), this would need a scoped, per-project opt-out. Nothing
+in the interactive product wants it.
