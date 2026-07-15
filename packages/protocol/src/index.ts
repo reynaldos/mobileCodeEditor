@@ -665,7 +665,17 @@ export interface GitCommitRequest {
   paths: string[]
 }
 
-/** Result of a git write op (checkout/stash/commit). `error` is human-readable on failure. */
+/**
+ * POST /api/projects/:id/git/discard — restore `paths` to their HEAD state,
+ * dropping working-tree changes (unstage + checkout tracked, remove untracked).
+ * Destructive and irreversible; the client confirms first.
+ */
+export interface GitDiscardRequest {
+  /** Repo-relative paths to discard (forward-slash, never absolute). */
+  paths: string[]
+}
+
+/** Result of a git write op (checkout/stash/commit/discard). `error` is human-readable on failure. */
 export interface GitOpResponse {
   ok: boolean
   error?: string

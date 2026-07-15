@@ -291,6 +291,7 @@ export function App(): React.JSX.Element {
             initialView={explorerView}
             open={explorerOpen}
             onOpenChange={setExplorerOpen}
+            onGitChange={() => void projectsState.refresh()}
           />
         </Suspense>
       )}

@@ -187,6 +187,30 @@ export async function commitPaths(cwd: string, message: string, paths: string[])
   return tryGit(cwd, ['commit', '-m', message, '--', ...paths])
 }
 
+/**
+ * Discard working-tree changes for `paths`, restoring each to HEAD. Per path
+ * (so one untracked file can't abort the whole batch): unstage, then either
+ * `checkout HEAD` for a tracked file or `clean` for an untracked one. Verifies
+ * the paths are clean afterward. Destructive and irreversible — the caller
+ * confirms first.
+ */
+export async function discardPaths(cwd: string, paths: string[]): Promise<{ ok: boolean; stderr: string }> {
+  if (paths.length === 0) return { ok: false, stderr: 'No files selected.' }
+  const errors: string[] = []
+  for (const path of paths) {
+    await tryGit(cwd, ['reset', '-q', 'HEAD', '--', path]) // unstage (no-op if nothing staged)
+    const restored = await tryGit(cwd, ['checkout', 'HEAD', '--', path]) // restore a tracked file
+    if (!restored.ok) {
+      // Not in HEAD → it's a new/untracked file; remove it from the working tree.
+      const cleaned = await tryGit(cwd, ['clean', '-fd', '--', path])
+      if (!cleaned.ok) errors.push(cleaned.stderr.trim() || restored.stderr.trim())
+    }
+  }
+  const remaining = (await git(cwd, ['status', '--porcelain', '--', ...paths])).trim()
+  if (remaining) return { ok: false, stderr: errors.length ? errors.join('\n') : `Could not fully discard:\n${remaining}` }
+  return { ok: true, stderr: '' }
+}
+
 /** Before/after text for one file, for the client's unified diff view. */
 export async function fileDiff(cwd: string, base: string, path: string): Promise<{ before: string; after: string }> {
   const before = await git(cwd, ['show', `${base}:${path}`])

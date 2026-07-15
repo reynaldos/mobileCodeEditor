@@ -7,6 +7,7 @@ import { test } from 'node:test'
 import {
   checkoutBranch,
   commitPaths,
+  discardPaths,
   isValidBranchName,
   listBranches,
   listStashes,
@@ -79,6 +80,32 @@ test('commitPaths refuses an empty selection', async () => {
   const dir = makeRepo()
   const result = await commitPaths(dir, 'nothing', [])
   assert.equal(result.ok, false)
+})
+
+test('discardPaths restores a modified file and removes an untracked one, leaving others alone', async () => {
+  const dir = makeRepo()
+  const read = (p: string): string => execFileSync('git', ['-C', dir, 'show', `HEAD:${p}`], { encoding: 'utf8' })
+
+  // A tracked modification, a brand-new untracked file, and an unrelated change to keep.
+  writeFileSync(join(dir, 'README.md'), 'tampered\n')
+  writeFileSync(join(dir, 'new.txt'), 'delete me\n')
+  writeFileSync(join(dir, 'keep.txt'), 'stays\n')
+
+  const result = await discardPaths(dir, ['README.md', 'new.txt'])
+  assert.ok(result.ok, result.stderr)
+
+  // README is back to its committed content; new.txt is gone.
+  const status = execFileSync('git', ['-C', dir, 'status', '--porcelain'], { encoding: 'utf8' })
+  assert.equal(read('README.md'), 'hello\n')
+  assert.ok(!status.includes('README.md'), 'README restored')
+  assert.ok(!status.includes('new.txt'), 'untracked new.txt removed')
+  // The file we didn't ask to discard is untouched.
+  assert.ok(status.includes('keep.txt'), 'keep.txt left alone')
+})
+
+test('discardPaths refuses an empty selection', async () => {
+  const dir = makeRepo()
+  assert.equal((await discardPaths(dir, [])).ok, false)
 })
 
 test('stash save/list/pop round-trips', async () => {

@@ -2,12 +2,21 @@ import type {
   GitBranchesResponse,
   GitCheckoutRequest,
   GitCommitRequest,
+  GitDiscardRequest,
   GitOpResponse,
   GitStashListResponse,
   GitStashRequest,
 } from '@mce/protocol'
 import type { FastifyInstance } from 'fastify'
-import { checkoutBranch, commitPaths, isValidBranchName, listBranches, listStashes, stashAction } from '../git-changes.ts'
+import {
+  checkoutBranch,
+  commitPaths,
+  discardPaths,
+  isValidBranchName,
+  listBranches,
+  listStashes,
+  stashAction,
+} from '../git-changes.ts'
 import type { ProjectStore } from '../projects.ts'
 
 /**
@@ -87,15 +96,31 @@ export function registerGitOps(app: FastifyInstance, projects: ProjectStore): vo
     if (!Array.isArray(paths) || paths.length === 0) {
       return reply.send({ ok: false, error: 'Select at least one file to commit.' } satisfies GitOpResponse)
     }
-    // Paths feed `git` argv directly (no shell); reject anything that climbs out
-    // of the repo or isn't a plain relative path.
-    if (!paths.every((p) => typeof p === 'string' && p.length > 0 && !p.includes('..') && !p.startsWith('/'))) {
-      return reply.send({ ok: false, error: 'Invalid file path.' } satisfies GitOpResponse)
-    }
+    if (!safePaths(paths)) return reply.send({ ok: false, error: 'Invalid file path.' } satisfies GitOpResponse)
 
     const result = await commitPaths(cwd, message, paths)
     return reply.send({ ok: result.ok, ...(result.ok ? {} : { error: cleanGitError(result.stderr) }) } satisfies GitOpResponse)
   })
+
+  app.post('/api/projects/:projectId/git/discard', async (request, reply) => {
+    const { projectId } = request.params as { projectId: string }
+    const cwd = cwdOr404(projectId, reply)
+    if (!cwd) return reply
+
+    const { paths } = (request.body ?? {}) as GitDiscardRequest
+    if (!Array.isArray(paths) || paths.length === 0) {
+      return reply.send({ ok: false, error: 'Select at least one file to discard.' } satisfies GitOpResponse)
+    }
+    if (!safePaths(paths)) return reply.send({ ok: false, error: 'Invalid file path.' } satisfies GitOpResponse)
+
+    const result = await discardPaths(cwd, paths)
+    return reply.send({ ok: result.ok, ...(result.ok ? {} : { error: cleanGitError(result.stderr) }) } satisfies GitOpResponse)
+  })
+}
+
+/** Paths feed `git` argv directly (no shell); every one must be a plain relative path inside the repo. */
+function safePaths(paths: unknown[]): paths is string[] {
+  return paths.every((p) => typeof p === 'string' && p.length > 0 && !p.includes('..') && !p.startsWith('/'))
 }
 
 /** Trim git's stderr to a single readable line for the client. */

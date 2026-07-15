@@ -63,7 +63,7 @@ export function RowMenu({ actions, label = 'Actions' }: { actions: RowMenuAction
           {/* A full-screen backdrop closes the menu on an outside tap (and locks the list from scrolling out from under it). */}
           <div className="fixed inset-0 z-40" onClick={() => setPos(null)} />
           <div
-            className="fixed z-50 flex w-44 flex-col overflow-hidden rounded-xl border border-line bg-panel py-1 shadow-2xl"
+            className="fixed z-50 flex w-max min-w-44 max-w-[calc(100vw-16px)] flex-col overflow-hidden rounded-xl border border-line bg-panel py-1 shadow-2xl"
             style={{ right: pos.right, top: pos.top, bottom: pos.bottom }}
             onClick={(e) => e.stopPropagation()}
           >
