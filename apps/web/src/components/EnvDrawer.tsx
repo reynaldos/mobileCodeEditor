@@ -1,7 +1,8 @@
 import type { EnvEntry } from '@mce/protocol'
-import { Eye, EyeOff, Loader, Plus, Trash2 } from 'lucide-react'
+import { ClipboardPaste, Eye, EyeOff, Loader, Plus, Trash2 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { fetchEnv, initEnv, saveEnv } from '../api.ts'
+import { looksLikeEnvBlock, mergeEnvEntries, parseEnvBlock } from '../env.ts'
 import { Drawer, DrawerContent, DrawerDescription, DrawerHeader, DrawerTitle } from './ui/drawer.tsx'
 
 interface Props {
@@ -23,12 +24,18 @@ export function EnvDrawer({ projectId, open, onOpenChange }: Props): React.JSX.E
   const [saved, setSaved] = useState(false)
   const [reveal, setReveal] = useState(false)
   const [error, setError] = useState<string | undefined>()
+  // The "Paste .env" panel: a textarea you drop a whole block into. Reliable on
+  // mobile where clipboard-read permission and paste interception are flaky.
+  const [pasteOpen, setPasteOpen] = useState(false)
+  const [pasteText, setPasteText] = useState('')
 
   useEffect(() => {
     if (!open || !projectId) return
     setLoading(true)
     setError(undefined)
     setSaved(false)
+    setPasteOpen(false)
+    setPasteText('')
     fetchEnv(projectId)
       .then((r) => {
         setEntries(r.entries)
@@ -49,6 +56,21 @@ export function EnvDrawer({ projectId, open, onOpenChange }: Props): React.JSX.E
   const removeRow = (i: number): void => {
     setEntries((prev) => prev.filter((_, j) => j !== i))
     setSaved(false)
+  }
+
+  /** Parse a pasted `.env` block and merge it into the rows (upsert by key). */
+  function applyPaste(text: string): boolean {
+    const parsed = parseEnvBlock(text)
+    if (parsed.length === 0) return false
+    setEntries((prev) => mergeEnvEntries(prev, parsed))
+    setSaved(false)
+    return true
+  }
+
+  function commitPaste(): void {
+    applyPaste(pasteText)
+    setPasteText('')
+    setPasteOpen(false)
   }
 
   async function scaffold(): Promise<void> {
@@ -124,6 +146,12 @@ export function EnvDrawer({ projectId, open, onOpenChange }: Props): React.JSX.E
                         spellCheck={false}
                         value={e.key}
                         onChange={(ev) => setRow(i, { key: ev.target.value })}
+                        onPaste={(ev) => {
+                          // Paste a whole KEY=value block into a key field and it
+                          // expands into rows; an ordinary key paste falls through.
+                          const text = ev.clipboardData.getData('text')
+                          if (looksLikeEnvBlock(text) && applyPaste(text)) ev.preventDefault()
+                        }}
                       />
                       <input
                         className="min-h-10 w-0 flex-1 rounded-lg border border-line bg-panel-2 px-2.5 font-mono text-[13px] text-fg outline-none focus:border-accent"
@@ -146,12 +174,55 @@ export function EnvDrawer({ projectId, open, onOpenChange }: Props): React.JSX.E
                   ))}
                 </ul>
 
-                <button
-                  className="mt-2 flex items-center gap-1.5 rounded-lg border border-dashed border-line px-3 py-2 text-[13px] text-muted hover:text-fg"
-                  onClick={addRow}
-                >
-                  <Plus className="size-4" /> Add variable
-                </button>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <button
+                    className="flex items-center gap-1.5 rounded-lg border border-dashed border-line px-3 py-2 text-[13px] text-muted hover:text-fg"
+                    onClick={addRow}
+                  >
+                    <Plus className="size-4" /> Add variable
+                  </button>
+                  <button
+                    className={`flex items-center gap-1.5 rounded-lg border border-dashed px-3 py-2 text-[13px] ${
+                      pasteOpen ? 'border-accent text-accent' : 'border-line text-muted hover:text-fg'
+                    }`}
+                    onClick={() => setPasteOpen((o) => !o)}
+                  >
+                    <ClipboardPaste className="size-4" /> Paste .env
+                  </button>
+                </div>
+
+                {pasteOpen && (
+                  <div className="mt-2 rounded-lg border border-line bg-panel-2 p-2">
+                    <textarea
+                      className="min-h-24 w-full resize-y rounded-md border border-line bg-panel px-2.5 py-2 font-mono text-[13px] text-fg outline-none focus:border-accent"
+                      placeholder={'Paste a block, e.g.\nAPI_KEY=sk-…\nDATABASE_URL=postgres://…'}
+                      autoCapitalize="none"
+                      autoCorrect="off"
+                      spellCheck={false}
+                      value={pasteText}
+                      onChange={(ev) => setPasteText(ev.target.value)}
+                      autoFocus
+                    />
+                    <div className="mt-2 flex items-center justify-end gap-2">
+                      <button
+                        className="rounded-lg px-3 py-1.5 text-[13px] text-muted hover:text-fg"
+                        onClick={() => {
+                          setPasteText('')
+                          setPasteOpen(false)
+                        }}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        className="rounded-lg border border-accent bg-accent px-3 py-1.5 text-[13px] font-semibold text-[#06101f] disabled:opacity-50"
+                        disabled={parseEnvBlock(pasteText).length === 0}
+                        onClick={commitPaste}
+                      >
+                        Add {parseEnvBlock(pasteText).length || ''} variable{parseEnvBlock(pasteText).length === 1 ? '' : 's'}
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {error && <p className="shrink-0 text-[13px] text-del">{error}</p>}
