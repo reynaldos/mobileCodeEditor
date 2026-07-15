@@ -45,10 +45,19 @@ export function App(): React.JSX.Element {
   // one (PHASE-3.md design call 3: browse-without-switching).
   const [explorerProjectId, setExplorerProjectId] = useState<string | null>(null)
   const [explorerView, setExplorerView] = useState<'tree' | 'source-control'>('tree')
+  // A file to open on the Explorer's file view (from a thread changes card's "View file"), or null.
+  const [explorerFile, setExplorerFile] = useState<string | null>(null)
   const [explorerOpen, setExplorerOpen] = useState(false)
   const openExplorer = useCallback((projectId: string, view: 'tree' | 'source-control') => {
     setExplorerProjectId(projectId)
     setExplorerView(view)
+    setExplorerFile(null)
+    setExplorerOpen(true)
+  }, [])
+  const openExplorerFile = useCallback((projectId: string, path: string) => {
+    setExplorerProjectId(projectId)
+    setExplorerView('tree')
+    setExplorerFile(path)
     setExplorerOpen(true)
   }, [])
   const builds = useBuilds(state)
@@ -240,7 +249,12 @@ export function App(): React.JSX.Element {
         />
       ) : (
         <>
-          <MessageList items={view.items} projectId={activeProjectId ?? undefined} agent={view.agent} />
+          <MessageList
+            items={view.items}
+            projectId={activeProjectId ?? undefined}
+            agent={view.agent}
+            onViewFile={activeProjectId ? (path) => openExplorerFile(activeProjectId, path) : undefined}
+          />
 
           <PromptBox
             projectId={activeProjectId}
@@ -289,6 +303,7 @@ export function App(): React.JSX.Element {
             projectName={projects.find((p) => p.id === explorerProjectId)?.name ?? explorerProjectId}
             branch={projects.find((p) => p.id === explorerProjectId)?.branch}
             initialView={explorerView}
+            initialFile={explorerFile ?? undefined}
             open={explorerOpen}
             onOpenChange={setExplorerOpen}
             onGitChange={() => void projectsState.refresh()}

@@ -13,6 +13,8 @@ interface Props {
   items: Item[]
   projectId?: string
   agent?: AgentState
+  /** Open a changed file in the Explorer (the thread changes-card "View file" kebab). */
+  onViewFile?: (path: string) => void
 }
 
 const DOT: Record<'running' | 'ok' | 'error', string> = {
@@ -50,7 +52,7 @@ function summarizeGroup(tools: ToolGroup['tools']): string {
 const sumFiles = (files: { additions: number; deletions: number }[], key: 'additions' | 'deletions'): number =>
   files.reduce((n, f) => n + f[key], 0)
 
-export function MessageList({ items, projectId, agent }: Props): React.JSX.Element {
+export function MessageList({ items, projectId, agent, onViewFile }: Props): React.JSX.Element {
   const scroller = useRef<HTMLDivElement>(null)
   const bottom = useRef<HTMLDivElement>(null)
   // Whether the reader is parked at (or near) the bottom. Updated on every scroll
@@ -103,7 +105,7 @@ export function MessageList({ items, projectId, agent }: Props): React.JSX.Eleme
         row.kind === 'toolGroup' ? (
           <ToolGroupRow key={row.key} group={row} projectId={projectId} />
         ) : (
-          <Row key={row.key} item={row} projectId={projectId} />
+          <Row key={row.key} item={row} projectId={projectId} onViewFile={onViewFile} />
         ),
       )}
       {waiting && <TypingBubble />}
@@ -381,7 +383,15 @@ function CopyButton({ text }: { text: string }): React.JSX.Element {
   )
 }
 
-function Row({ item, projectId }: { item: Item; projectId?: string }): React.JSX.Element | null {
+function Row({
+  item,
+  projectId,
+  onViewFile,
+}: {
+  item: Item
+  projectId?: string
+  onViewFile?: (path: string) => void
+}): React.JSX.Element | null {
   switch (item.kind) {
     case 'user':
       return (
@@ -440,7 +450,7 @@ function Row({ item, projectId }: { item: Item; projectId?: string }): React.JSX
       return <div className="my-0.5 h-px w-16 self-center rounded-full bg-line" />
 
     case 'changes':
-      return <ChangesView base={item.base} files={item.files} projectId={projectId} />
+      return <ChangesView base={item.base} files={item.files} projectId={projectId} onViewFile={onViewFile} />
 
     case 'ended':
       // A clean finish is silent; only surface error/interrupted — those matter.

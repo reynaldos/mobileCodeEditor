@@ -1,9 +1,10 @@
 import type { ChangedFile } from '@mce/protocol'
-import { ChevronRight, Loader } from 'lucide-react'
+import { ChevronRight, FileCode, Loader } from 'lucide-react'
 import { useState } from 'react'
 import { fetchFileDiff } from '../api.ts'
 import type { DiffSubject } from '../diff.ts'
 import { DiffView } from './DiffView.tsx'
+import { RowMenu } from './RowMenu.tsx'
 
 const STATUS_LABEL: Record<ChangedFile['status'], string> = {
   added: 'A',
@@ -30,10 +31,13 @@ export function ChangesView({
   base,
   files,
   projectId,
+  onViewFile,
 }: {
   base: string
   files: ChangedFile[]
   projectId?: string
+  /** Open a changed file in the Explorer's file view (the per-row "View file" kebab action). */
+  onViewFile?: (path: string) => void
 }): React.JSX.Element {
   return (
     <div className="overflow-hidden rounded-xl border border-line bg-panel">
@@ -48,7 +52,7 @@ export function ChangesView({
       </div>
       <ul>
         {files.map((f) => (
-          <FileRow key={f.path} file={f} base={base} projectId={projectId} />
+          <FileRow key={f.path} file={f} base={base} projectId={projectId} onViewFile={onViewFile} />
         ))}
       </ul>
     </div>
@@ -59,10 +63,12 @@ function FileRow({
   file,
   base,
   projectId,
+  onViewFile,
 }: {
   file: ChangedFile
   base: string
   projectId?: string
+  onViewFile?: (path: string) => void
 }): React.JSX.Element {
   const [open, setOpen] = useState(false)
   const [diff, setDiff] = useState<DiffSubject | undefined>()
@@ -85,19 +91,28 @@ function FileRow({
     }
   }
 
+  // A deleted file has nothing to open in the viewer, so skip its "View file" action.
+  const actions =
+    onViewFile && file.status !== 'deleted'
+      ? [{ key: 'view', label: 'View file', icon: FileCode, onClick: () => onViewFile(file.path) }]
+      : []
+
   return (
     <li className="border-t border-line">
-      <button className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-panel-2" onClick={() => void toggle()}>
-        <ChevronRight className={`size-3.5 shrink-0 text-muted transition-transform ${open ? 'rotate-90' : ''}`} />
-        <span className={`w-3 shrink-0 text-center font-mono text-[12px] ${STATUS_COLOR[file.status]}`}>
-          {STATUS_LABEL[file.status]}
-        </span>
-        <span className="min-w-0 flex-1 truncate font-mono text-[13px] text-fg">{file.path}</span>
-        <span className="shrink-0 font-mono text-[11px]">
-          {file.additions > 0 && <span className="text-add">+{file.additions}</span>}{' '}
-          {file.deletions > 0 && <span className="text-del">−{file.deletions}</span>}
-        </span>
-      </button>
+      <div className="group flex items-center gap-2 px-3 py-2 hover:bg-panel-2">
+        <button className="flex min-w-0 flex-1 items-center gap-2 text-left" onClick={() => void toggle()}>
+          <ChevronRight className={`size-3.5 shrink-0 text-muted transition-transform ${open ? 'rotate-90' : ''}`} />
+          <span className={`w-3 shrink-0 text-center font-mono text-[12px] ${STATUS_COLOR[file.status]}`}>
+            {STATUS_LABEL[file.status]}
+          </span>
+          <span className="min-w-0 flex-1 truncate font-mono text-[13px] text-fg">{file.path}</span>
+          <span className="shrink-0 font-mono text-[11px]">
+            {file.additions > 0 && <span className="text-add">+{file.additions}</span>}{' '}
+            {file.deletions > 0 && <span className="text-del">−{file.deletions}</span>}
+          </span>
+        </button>
+        {actions.length > 0 && <RowMenu label={`Actions for ${file.path}`} actions={actions} />}
+      </div>
 
       {open && (
         <div className="border-t border-line">

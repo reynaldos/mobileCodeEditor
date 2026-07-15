@@ -15,6 +15,8 @@ interface Props {
   branch?: string
   /** Which view to land on when this opens — the nav-bar's Explorer and Source control entries (and a project row's Explorer action) each pick one. */
   initialView: View
+  /** A file to open straight into the file view when this opens — set by a thread changes card's "View file". Overrides `initialView`. */
+  initialFile?: string
   open: boolean
   onOpenChange: (open: boolean) => void
   /** A git op in Source control changed the branch/commit state — refetch the project list so the branch subtitle stays live. */
@@ -33,7 +35,7 @@ interface Props {
  * the active file's name once one's open. Right is the existing
  * `ActionsMenu` kebab, reused as-is.
  */
-export function ExplorerDrawer({ projectId, projectName, branch, initialView, open, onOpenChange, onGitChange }: Props): React.JSX.Element {
+export function ExplorerDrawer({ projectId, projectName, branch, initialView, initialFile, open, onOpenChange, onGitChange }: Props): React.JSX.Element {
   const [view, setView] = useState<View>(initialView)
   const [refreshKey, setRefreshKey] = useState(0)
   const tabs = useOpenFiles()
@@ -44,10 +46,18 @@ export function ExplorerDrawer({ projectId, projectName, branch, initialView, op
 
   // Reopening lands on whichever view was requested (see PHASE-3.md's
   // acceptance test) — open tabs themselves persist across a close/reopen of
-  // the same project.
+  // the same project. An `initialFile` (from a thread changes card's "View
+  // file") wins: open that tab and land straight in the file view.
   useEffect(() => {
-    if (open) setView(initialView)
-  }, [open, initialView])
+    if (!open) return
+    if (initialFile) {
+      tabs.open(initialFile)
+      setView('file')
+    } else {
+      setView(initialView)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, initialView, initialFile])
 
   // Header title mirrors the active tab — `name` for a source tab, `(Preview) name` for a preview tab.
   const activeTabLabel = tabs.active ? tabLabel(tabs.active) : undefined
