@@ -104,6 +104,7 @@ container is the unit of everything, and Tailscale membership is authentication.
 
 | Doc | What's in it |
 |---|---|
+| [ELEVATOR-PITCH.md](docs/ELEVATOR-PITCH.md) | **Start here** — what it does, how it's structured, and why, in plain terms |
 | [ROADMAP.md](docs/ROADMAP.md) | **Where we are**, what shipped, recommended next steps |
 | [DECISIONS.md](docs/DECISIONS.md) | Every load-bearing choice and why — read this before disagreeing with one |
 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) | System design, data model, session lifecycle, security posture |
