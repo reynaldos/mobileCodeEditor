@@ -1,5 +1,6 @@
 import type { FsEntry, FsSearchMatch } from '@mce/protocol'
 import {
+  Check,
   ChevronRight,
   ClipboardCopy,
   Eye,
@@ -10,14 +11,41 @@ import {
   Folder,
   FolderOpen,
   Image as ImageIcon,
+  ListChecks,
   Loader,
   Search,
   X,
 } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { createContext, useContext, useEffect, useState } from 'react'
 import { fetchFileTree, searchProjectFiles } from '../api.ts'
 import { useDebounced } from '../useDebounced.ts'
 import { RowMenu, type RowMenuAction } from './RowMenu.tsx'
+
+/**
+ * Multi-select state, shared down the tree via context so the deeply-recursive
+ * `TreeNode` (and the flat search list) can read it without threading props
+ * through every level. `active` is "select mode is on"; the only bulk action is
+ * copying the selected paths (the ask for this feature).
+ */
+interface Selection {
+  active: boolean
+  has: (path: string) => boolean
+  toggle: (path: string) => void
+}
+const SelectionCtx = createContext<Selection>({ active: false, has: () => false, toggle: () => undefined })
+
+/** The leading checkbox on a selectable file row (shown only in select mode). */
+function RowCheck({ checked }: { checked: boolean }): React.JSX.Element {
+  return (
+    <span
+      className={`flex size-4 shrink-0 items-center justify-center rounded border ${
+        checked ? 'border-accent bg-accent/20 text-accent' : 'border-line text-transparent'
+      }`}
+    >
+      <Check className="size-3" />
+    </span>
+  )
+}
 
 interface Props {
   projectId: string
@@ -57,6 +85,37 @@ export function FileTree({ projectId, onOpenFile, onPreview }: Props): React.JSX
   const [results, setResults] = useState<FsSearchMatch[]>([])
   const [truncated, setTruncated] = useState(false)
   const [searching, setSearching] = useState(false)
+  const [selectMode, setSelectMode] = useState(false)
+  const [selected, setSelected] = useState<Set<string>>(() => new Set())
+  const [copied, setCopied] = useState(false)
+
+  const selection: Selection = {
+    active: selectMode,
+    has: (p) => selected.has(p),
+    toggle: (p) =>
+      setSelected((cur) => {
+        const next = new Set(cur)
+        if (next.has(p)) next.delete(p)
+        else next.add(p)
+        return next
+      }),
+  }
+
+  function exitSelect(): void {
+    setSelectMode(false)
+    setSelected(new Set())
+    setCopied(false)
+  }
+
+  function copySelected(): void {
+    if (selected.size === 0) return
+    // `@`-prefixed, one per line — same reference form as the single-row "Copy
+    // path", so pasting the block into the prompt reads as file references.
+    const text = [...selected].sort().map((p) => `@${p}`).join('\n')
+    void navigator.clipboard?.writeText(text)
+    setCopied(true)
+    window.setTimeout(() => setCopied(false), 1400)
+  }
 
   useEffect(() => {
     const q = debounced.trim()
@@ -81,45 +140,75 @@ export function FileTree({ projectId, onOpenFile, onPreview }: Props): React.JSX
   }, [projectId, debounced])
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <div className="relative shrink-0 px-3 pt-3">
-        <Search className="pointer-events-none absolute left-6 top-1/2 size-4 -translate-y-1/2 text-muted" />
-        <input
-          className="min-h-10 w-full rounded-lg border border-line bg-panel-2 pl-9 pr-9 text-[15px] text-fg outline-none focus:border-accent"
-          value={query}
-          placeholder="Search file contents"
-          autoCapitalize="none"
-          autoCorrect="off"
-          spellCheck={false}
-          onChange={(e) => setQuery(e.target.value)}
-        />
-        {searching ? (
-          <Loader className="absolute right-5 top-1/2 size-4 -translate-y-1/2 animate-spin text-muted" />
-        ) : query ? (
-          <button
-            className="absolute right-4 top-1/2 flex size-6 -translate-y-1/2 items-center justify-center rounded-md text-muted hover:bg-line"
-            aria-label="Clear search"
-            onClick={() => setQuery('')}
-          >
-            <X className="size-4" />
-          </button>
-        ) : null}
-      </div>
-
-      <div className="min-h-0 flex-1 overflow-y-auto px-1.5 py-2">
-        {query.trim() ? (
-          <SearchResults
-            results={results}
-            truncated={truncated}
-            searching={searching}
-            onOpenFile={onOpenFile}
-            onPreview={onPreview}
+    <SelectionCtx.Provider value={selection}>
+      <div className="flex min-h-0 flex-1 flex-col">
+        <div className="relative shrink-0 px-3 pt-3">
+          <Search className="pointer-events-none absolute left-6 top-1/2 size-4 -translate-y-1/2 text-muted" />
+          <input
+            className="min-h-10 w-full rounded-lg border border-line bg-panel-2 pl-9 pr-9 text-[15px] text-fg outline-none focus:border-accent"
+            value={query}
+            placeholder="Search file contents"
+            autoCapitalize="none"
+            autoCorrect="off"
+            spellCheck={false}
+            onChange={(e) => setQuery(e.target.value)}
           />
-        ) : (
-          <RootTree projectId={projectId} onOpenFile={onOpenFile} onPreview={onPreview} />
-        )}
+          {searching ? (
+            <Loader className="absolute right-5 top-1/2 size-4 -translate-y-1/2 animate-spin text-muted" />
+          ) : query ? (
+            <button
+              className="absolute right-4 top-1/2 flex size-6 -translate-y-1/2 items-center justify-center rounded-md text-muted hover:bg-line"
+              aria-label="Clear search"
+              onClick={() => setQuery('')}
+            >
+              <X className="size-4" />
+            </button>
+          ) : null}
+        </div>
+
+        <div className="flex shrink-0 items-center justify-between gap-2 px-3 py-1.5">
+          {selectMode ? (
+            <>
+              <span className="text-[12px] text-muted">{selected.size} selected</span>
+              <div className="flex items-center gap-1.5">
+                <button
+                  className="flex items-center gap-1.5 rounded-lg border border-line px-2.5 py-1 text-[12px] text-fg hover:bg-panel-2 disabled:opacity-50"
+                  disabled={selected.size === 0}
+                  onClick={copySelected}
+                >
+                  {copied ? <Check className="size-3.5 text-add" /> : <ClipboardCopy className="size-3.5" />}
+                  {copied ? 'Copied' : 'Copy paths'}
+                </button>
+                <button className="rounded-lg px-2 py-1 text-[12px] text-muted hover:text-fg" onClick={exitSelect}>
+                  Done
+                </button>
+              </div>
+            </>
+          ) : (
+            <button
+              className="ml-auto flex items-center gap-1.5 rounded-lg border border-line px-2.5 py-1 text-[12px] text-fg hover:bg-panel-2"
+              onClick={() => setSelectMode(true)}
+            >
+              <ListChecks className="size-3.5" /> Select
+            </button>
+          )}
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-y-auto px-1.5 py-2">
+          {query.trim() ? (
+            <SearchResults
+              results={results}
+              truncated={truncated}
+              searching={searching}
+              onOpenFile={onOpenFile}
+              onPreview={onPreview}
+            />
+          ) : (
+            <RootTree projectId={projectId} onOpenFile={onOpenFile} onPreview={onPreview} />
+          )}
+        </div>
       </div>
-    </div>
+    </SelectionCtx.Provider>
   )
 }
 
@@ -136,6 +225,7 @@ function SearchResults({
   onOpenFile: (path: string) => void
   onPreview: (path: string) => void
 }): React.JSX.Element {
+  const selection = useContext(SelectionCtx)
   if (searching && results.length === 0) {
     return <p className="px-2.5 py-8 text-center text-[13px] text-muted">Searching…</p>
   }
@@ -146,9 +236,14 @@ function SearchResults({
     <ul className="flex flex-col gap-0.5">
       {results.map((m, i) => (
         <li key={`${m.path}:${m.line}:${i}`} className="group flex items-center rounded-lg hover:bg-panel-2">
+          {selection.active && (
+            <span className="pl-2.5">
+              <RowCheck checked={selection.has(m.path)} />
+            </span>
+          )}
           <button
             className="flex min-w-0 flex-1 flex-col items-start gap-0.5 px-2.5 py-2 text-left"
-            onClick={() => onOpenFile(m.path)}
+            onClick={() => (selection.active ? selection.toggle(m.path) : onOpenFile(m.path))}
           >
             <span className="flex w-full items-center gap-1.5 text-[12px] text-muted">
               <FileIcon name={m.path} className="size-3.5 shrink-0" />
@@ -157,9 +252,11 @@ function SearchResults({
             </span>
             <span className="w-full truncate font-mono text-[12px] text-fg">{m.text}</span>
           </button>
-          <span className="shrink-0 pr-1.5">
-            <RowMenu label={`Actions for ${m.path}`} actions={fileMenuActions(m.path, onPreview)} />
-          </span>
+          {!selection.active && (
+            <span className="shrink-0 pr-1.5">
+              <RowMenu label={`Actions for ${m.path}`} actions={fileMenuActions(m.path, onPreview)} />
+            </span>
+          )}
         </li>
       ))}
       {truncated && (
@@ -224,14 +321,18 @@ function TreeNode({
   onOpenFile: (path: string) => void
   onPreview: (path: string) => void
 }): React.JSX.Element {
+  const selection = useContext(SelectionCtx)
   const [open, setOpen] = useState(false)
   const [children, setChildren] = useState<FsEntry[] | null>(null)
   const [loading, setLoading] = useState(false)
   const indent = 12 + depth * 16
 
   function toggle(): void {
+    // In select mode, tapping a file toggles its selection instead of opening it.
+    // Folders still expand (you navigate to reach the files you want).
     if (entry.type === 'file') {
-      onOpenFile(entry.path)
+      if (selection.active) selection.toggle(entry.path)
+      else onOpenFile(entry.path)
       return
     }
     if (open) {
@@ -262,13 +363,17 @@ function TreeNode({
             </>
           ) : (
             <>
-              <span className="size-3.5 shrink-0" />
+              {selection.active ? (
+                <RowCheck checked={selection.has(entry.path)} />
+              ) : (
+                <span className="size-3.5 shrink-0" />
+              )}
               <FileIcon name={entry.name} className="size-4 shrink-0" />
             </>
           )}
           <span className="truncate text-[14px] text-fg">{entry.name}</span>
         </button>
-        {entry.type === 'file' && (
+        {entry.type === 'file' && !selection.active && (
           <span className="shrink-0 pr-1.5">
             <RowMenu label={`Actions for ${entry.name}`} actions={fileMenuActions(entry.path, onPreview)} />
           </span>
