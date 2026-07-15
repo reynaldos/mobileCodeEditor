@@ -285,6 +285,30 @@ test('Read is auto-approved and never raises a card', async () => {
   await session.stop()
 })
 
+test('planning tools (TodoWrite/Task*) are auto-approved and never raise a card', async () => {
+  const seen = capture()
+  const { session, log } = makeSession(
+    fakeQuery(async function* ({ prompt, options }) {
+      yield init()
+      for await (const _ of prompt) {
+        const signal = new AbortController().signal
+        for (const name of ['TodoWrite', 'TaskCreate', 'TaskUpdate', 'TaskList']) {
+          seen.verdict = await options.canUseTool!(name, { todos: [] }, { toolUseID: `tu-${name}`, signal })
+          assert.equal(seen.verdict?.behavior, 'allow', `${name} must be auto-approved`)
+        }
+        yield done()
+      }
+    }),
+  )
+
+  session.start()
+  session.prompt('go')
+  await waitFor(() => session.status === 'awaiting_input', 'turn to finish')
+
+  assert.ok(!types(log).includes('approval_request'), 'planning tools must not prompt')
+  await session.stop()
+})
+
 test('Edit parks on canUseTool until an HTTP approval resolves it', async () => {
   const seen = capture()
   const { session, log } = makeSession(

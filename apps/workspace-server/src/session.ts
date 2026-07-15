@@ -29,6 +29,17 @@ import type { UploadStore } from './uploads.ts'
  */
 const AUTO_APPROVED = new Set(['Read', 'Grep', 'Glob'])
 
+/**
+ * Planning/bookkeeping tools we also never prompt on. Unlike AUTO_APPROVED these
+ * aren't read-only, but they have no effect on the repo or the system — they only
+ * drive the live task-list card. Gating them behind an approval card was a bug:
+ * every checklist update raised a "Claude wants to use TodoWrite" card, so the
+ * model hit approval friction and reverted to prose/sub-agent plans, and the
+ * custom task-list UI (which renders off a real TodoWrite/Task* call) rarely
+ * appeared. Auto-approving them is what lets that card update in real time.
+ */
+const PLANNING_TOOLS = new Set(['TodoWrite', 'TaskCreate', 'TaskUpdate', 'TaskList'])
+
 const SUMMARY_MAX = 200
 
 /**
@@ -328,9 +339,10 @@ export class AgentSession {
    * blocked indefinitely, with no error and no timeout.
    */
   readonly #canUseTool: CanUseTool = async (toolName, input, options) => {
-    // Built-in read-only allowlist, plus the user's own standing rules from
-    // "Always approve" (projected from the log, per project).
-    if (AUTO_APPROVED.has(toolName) || this.#allowedByRule(toolName, input)) {
+    // Built-in read-only allowlist, side-effect-free planning tools, plus the
+    // user's own standing rules from "Always approve" (projected from the log,
+    // per project). None of these should ever surface an approval card.
+    if (AUTO_APPROVED.has(toolName) || PLANNING_TOOLS.has(toolName) || this.#allowedByRule(toolName, input)) {
       return { behavior: 'allow', updatedInput: input, toolUseID: options.toolUseID }
     }
 
