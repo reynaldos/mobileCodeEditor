@@ -1,7 +1,7 @@
 import type { IncomingMessage } from 'node:http'
 import type { Duplex } from 'node:stream'
 import type { FastifyInstance } from 'fastify'
-import { spawn } from 'node-pty'
+import type { IPty } from 'node-pty'
 import { WebSocket, WebSocketServer } from 'ws'
 import { parseTerminalMessage, resolveShell } from '../terminal.ts'
 import type { ProjectStore } from '../projects.ts'
@@ -41,7 +41,7 @@ export function registerTerminal(app: FastifyInstance, projects: ProjectStore): 
       socket.destroy()
       return true
     }
-    wss.handleUpgrade(req, socket, head, (ws) => startSession(ws, cwd))
+    wss.handleUpgrade(req, socket, head, (ws) => void startSession(ws, cwd))
     return true
   }
 
@@ -69,15 +69,30 @@ export function registerTerminal(app: FastifyInstance, projects: ProjectStore): 
   })
 }
 
-/** Wire one WebSocket to a fresh PTY: output → socket, framed input → PTY, both cleaned up together. */
-function startSession(ws: WebSocket, cwd: string): void {
-  const pty = spawn(resolveShell(), [], {
-    name: 'xterm-256color',
-    cwd,
-    cols: 80,
-    rows: 24,
-    env: { ...process.env, TERM: 'xterm-256color' },
-  })
+/**
+ * Spawn a PTY for a socket. `node-pty` is a native module and is imported LAZILY
+ * (dynamic import) so the server and the test suite load fine on a host where it
+ * isn't built — only actually opening a terminal needs the binary. If the load
+ * fails, the socket gets a readable error instead of crashing anything.
+ */
+async function startSession(ws: WebSocket, cwd: string): Promise<void> {
+  let pty: IPty
+  try {
+    const { spawn } = await import('node-pty')
+    pty = spawn(resolveShell(), [], {
+      name: 'xterm-256color',
+      cwd,
+      cols: 80,
+      rows: 24,
+      env: { ...process.env, TERM: 'xterm-256color' },
+    })
+  } catch {
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.send('\r\n\x1b[31mTerminal unavailable — the PTY native module (node-pty) failed to load on this host.\x1b[0m\r\n')
+      ws.close()
+    }
+    return
+  }
 
   const onData = pty.onData((chunk) => {
     if (ws.readyState === WebSocket.OPEN) ws.send(chunk)

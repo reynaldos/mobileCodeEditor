@@ -15,5 +15,9 @@
   },
   "devDependencies": {
     "typescript": "^5.7.2"
+  },
+  "pnpm": {
+    "//": "node-pty ships no Linux prebuilt binary, so it must compile from source on the CI runner and in the Docker build stage. pnpm v10 blocks dependency build scripts unless allowlisted here.",
+    "onlyBuiltDependencies": ["node-pty"]
   }
 }
