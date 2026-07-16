@@ -1,5 +1,5 @@
 import { LEGACY_THREAD_ID } from '@mce/protocol'
-import { ChevronDown, Files, GitBranch, History, KeyRound, MessageCirclePlus, MonitorPlay } from 'lucide-react'
+import { ChevronDown, Files, GitBranch, History, KeyRound, MessageCirclePlus, MonitorPlay, SquareTerminal } from 'lucide-react'
 import { lazy, Suspense, useCallback, useEffect, useState } from 'react'
 import { deleteThread, fetchHealth, type Health, renameThread, sendPrompt } from './api.ts'
 import { ActionsMenu } from './components/ActionsMenu.tsx'
@@ -26,6 +26,9 @@ import { useThreads } from './useThreads.ts'
  * everyone else's initial PWA load stays light.
  */
 const ExplorerDrawer = lazy(() => import('./components/ExplorerDrawer.tsx').then((m) => ({ default: m.ExplorerDrawer })))
+
+/** xterm.js (+ its addon) is heavy and most sessions never open a terminal — its own chunk, loaded on first open. */
+const TerminalDrawer = lazy(() => import('./components/TerminalDrawer.tsx').then((m) => ({ default: m.TerminalDrawer })))
 
 /** Which overlay is up, if any. null = the conversation (or the thread list — see `activeThreadId`). */
 type Overlay = 'projects' | null
@@ -59,6 +62,14 @@ export function App(): React.JSX.Element {
     setExplorerView('tree')
     setExplorerFile(path)
     setExplorerOpen(true)
+  }, [])
+  // The terminal drawer's target project persists through a close so it can play
+  // its close animation (mirrors the explorer/preview drawers).
+  const [terminalProjectId, setTerminalProjectId] = useState<string | null>(null)
+  const [terminalOpen, setTerminalOpen] = useState(false)
+  const openTerminal = useCallback((projectId: string) => {
+    setTerminalProjectId(projectId)
+    setTerminalOpen(true)
   }, [])
   const builds = useBuilds(state)
   const preview = usePreview(state.preview)
@@ -197,6 +208,12 @@ export function App(): React.JSX.Element {
                   icon: GitBranch,
                   onClick: () => activeProjectId && openExplorer(activeProjectId, 'source-control'),
                 },
+                {
+                  key: 'terminal',
+                  label: 'Terminal',
+                  icon: SquareTerminal,
+                  onClick: () => activeProjectId && openTerminal(activeProjectId),
+                },
                 ...(activeProject?.previewSupported
                   ? [
                       {
@@ -315,6 +332,18 @@ export function App(): React.JSX.Element {
                 void sendPrompt(summary, explorerProjectId, activeThreadId).catch(() => undefined)
               }
             }}
+          />
+        </Suspense>
+      )}
+
+      {terminalProjectId && (
+        <Suspense fallback={null}>
+          <TerminalDrawer
+            key={terminalProjectId}
+            projectId={terminalProjectId}
+            projectName={projects.find((p) => p.id === terminalProjectId)?.name ?? terminalProjectId}
+            open={terminalOpen}
+            onOpenChange={setTerminalOpen}
           />
         </Suspense>
       )}

@@ -27,6 +27,7 @@ import { registerGithub } from './routes/github.ts'
 import { registerGitOps } from './routes/git-ops.ts'
 import { registerGitRefresh } from './routes/git-refresh.ts'
 import { registerGitStatus } from './routes/git-status.ts'
+import { registerTerminal } from './routes/terminal.ts'
 import { registerPresence } from './routes/presence.ts'
 import { registerPreview } from './routes/preview.ts'
 import { registerProjects } from './routes/projects.ts'
@@ -288,6 +289,7 @@ export async function buildServer(config: Config, services: Services): Promise<F
   registerPush(app, config, pushStore, pusher)
   registerDebug(app, log, config)
   registerUploads(app, uploads)
+  registerTerminal(app, projects)
 
   // Serving the PWA from this same origin is what deletes CORS, mixed content,
   // and cross-service tokens from the project. See ARCHITECTURE.md.

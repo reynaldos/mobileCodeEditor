@@ -88,6 +88,17 @@ export const previewStreamUrl = (projectId: string): string =>
 /** Same-origin, reverse-proxied URL for the preview iframe / "open in new tab". */
 export const previewUrl = (projectId: string): string => `${BASE}/preview/${encodeURIComponent(projectId)}/`
 
+/**
+ * WebSocket URL for a project's terminal (Phase 4). Derives ws/wss from the API
+ * origin — `BASE` when set (vite dev points at :3000), else this page's origin
+ * (prod serves the app same-origin as the server, so it's just wss://<host>).
+ */
+export const terminalSocketUrl = (projectId: string): string => {
+  const origin = BASE || window.location.origin
+  const wsOrigin = origin.replace(/^http/, 'ws') // http→ws, https→wss
+  return `${wsOrigin}/api/projects/${encodeURIComponent(projectId)}/terminal`
+}
+
 export class ApiError extends Error {
   constructor(
     readonly status: number,
