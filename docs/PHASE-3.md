@@ -11,7 +11,10 @@ confirmed and shipped; the FS/exec RPC surface, the `ExplorerDrawer`, tree, read
 and Source control view all exist. Since v1 the phase also grew a rendered **markdown preview**,
 a per-file **Copy path / Open preview** kebab, and **`@file` reference highlighting** in the
 prompt box — all captured in [As built](#as-built--what-actually-shipped) at the end of this
-doc. What's still deferred: file editing (write + Save), which stays the second pass.
+doc. The deferred **write pass has since shipped**: the CodeMirror viewer is now editable, with a
+**Save** (`PUT /fs/file`), per-tab dirty tracking (the LRU evictor skips unsaved tabs), an
+unsaved-close confirmation, and a `beforeunload` guard. See [FileEditor.tsx](../apps/web/src/components/FileEditor.tsx)
+and `writeTextFile` in [fs-browser.ts](../apps/workspace-server/src/fs-browser.ts).
 
 **Update — Source control is no longer read-only.** The read-only slice below (design call 4)
 was the starting point; the tab has since pulled the Git-UI half of Phase 6 forward. It now has
@@ -346,7 +349,8 @@ What's still genuinely open:
 
 ### Still deferred
 
-Editing (write + Save + `file_saved`), and the git operations still marked open above —
-periodic fetch, merge/rebase, and conflict resolution. Commit, push, discard, stash, and
-branch switch/create have shipped (see the top-of-doc **Update**). See [Deferred
-deliberately](#deferred-deliberately) above.
+Only the git operations still marked open above — periodic fetch, merge/rebase, and conflict
+resolution. **Editing** (write + Save) and **commit / push / discard / stash / branch
+switch-create** have all shipped (see the top-of-doc **Update** and the status note). The
+`file_saved` event was never needed — Save is a plain request/response `PUT`, not something the
+log has to remember. See [Deferred deliberately](#deferred-deliberately) above.

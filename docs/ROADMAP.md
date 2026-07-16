@@ -28,8 +28,10 @@ against a container running on Fly.io that never sleeps, with your laptop closed
 | Phase 2.6 — visible project setup (stream, install, cancel, notify) | ✅ done, on-device verified |
 | Phase 2.7 — questions UI, allowlist, changes accordion, git identity, `.env` editor | ✅ done, on-device verified |
 | UX polish pass (PromptBox, images, PWA, markdown replies, tool-call grouping, header) | ✅ done, on-device verified, two known issues open (below) |
-| Phase 3 — files + editor (browser, read-only viewer, Source control, markdown preview, `@`-refs) | ✅ built on `phase-3/file-browser-editor`, on-device verification pending |
-| Phase 4 — terminal · 5 — preview · 6 — convenience | ▫️ not started |
+| Phase 3 — files + editor (browser, **editable** CodeMirror + Save, Source control incl. commit/push, markdown preview, `@`-refs) | ✅ built on `phase-3/file-browser-editor`, on-device verification pending |
+| Phase 4 — terminal (xterm.js + node-pty over a WebSocket) | ✅ built on `phase-4/file-editing-and-terminal`, on-device verification pending |
+| Phase 5 — preview (iframed dev server) | ✅ built |
+| Phase 6 — convenience (git UI landed early in Phase 3; Vercel + project settings open) | ◐ partial |
 
 **Known issues, deliberately deferred** (see [ON-DEVICE-CHECKLIST.md](ON-DEVICE-CHECKLIST.md)
 for repro notes) — neither blocks moving on:
@@ -204,16 +206,18 @@ without touching a laptop.
 
 ---
 
-## Phase 3 — Files and editor — ✅ built (read-only), on-device verification pending
+## Phase 3 — Files and editor — ✅ built (editable + Source control write), on-device verification pending
 
 **Shipped on `phase-3/file-browser-editor`.** The full design and the as-built delta live in
 [PHASE-3.md](PHASE-3.md). What's in: the `ExplorerDrawer` (Files / Source control views), a lazy
-ripgrep-backed `FileTree`, a read-only CodeMirror 6 viewer with an 8-tab LRU strip, a read-only
+ripgrep-backed `FileTree`, an **editable** CodeMirror 6 editor (write + Save via `PUT /fs/file`,
+per-tab dirty tracking, unsaved-close guard) with an 8-tab LRU strip, a read-only
 `SourceControlView` (multiple change diffs expandable at once), a rendered **markdown preview**
 that opens as its own read-only `(Preview)` tab (react-markdown + GFM + sanitized raw HTML), a
 per-file kebab (**Copy path** as an `@`-reference, **Open preview** for markdown), and `@file`
-reference highlighting in the prompt box. Editing (write + Save) is still the deliberate second
-pass. **Source control has since grown past read-only** (that slice of Phase 6 was pulled
+reference highlighting in the prompt box. **Editing shipped** (the deferred second pass): the
+viewer is now writable, with a Save bar, a dirty dot per tab, an unsaved-close confirm, and a
+`beforeunload` guard. **Source control has since grown past read-only** (that slice of Phase 6 was pulled
 forward): branch switch/create, stash, per-file **discard**, and a **commit review** — file
 checkboxes gate a **Commit & push** button, and the agent is now blocked from committing/pushing
 itself (see [DECISIONS #23](DECISIONS.md), and the accordion below plus multi-select file copy).
@@ -232,14 +236,24 @@ editor, that's not a gap — that's the thesis being right.
 
 ---
 
-## Phase 4 — Terminal
+## Phase 4 — Terminal — ✅ built, on-device verification pending
 
-xterm.js over a WebSocket to node-pty.
-
-Budget for the soft key row above the keyboard — tab, escape, ctrl, arrows, pipe. Every
-mobile terminal ships one, because a phone keyboard cannot produce Ctrl-C.
+**Shipped on `phase-4/file-editing-and-terminal`** (full write-up in [PHASE-4.md](PHASE-4.md)).
+xterm.js over a WebSocket to `node-pty`: a `TerminalDrawer` (lazy-loaded — xterm is heavy) opens
+a shell in the project directory, output streams straight in, keystrokes go back framed, and a
+**soft-key row** supplies what a phone keyboard can't — sticky Ctrl, Esc, Tab, arrows, pipe.
 
 Terminal bytes are ephemeral. They do not go in the event log.
+
+Two things bit, both captured in PHASE-4.md: the terminal's `upgrade` has to be sequenced
+**after** the preview reverse-proxy's shared upgrade handler (Node fires them synchronously, so
+the proxy's 404 clobbered ours), and `node-pty` is a native module with **no Linux prebuilt
+binary** — it's imported lazily and allowlisted for a from-source build so CI/Docker compile it.
+
+**Security note (Phase 4 makes this sharp):** the terminal is an unrestricted shell — it bypasses
+the agent's approval flow and the `resolveSafe` path guard by design. That's fine single-tenant
+(Tailscale + a disposable non-root container), but see [DECISIONS #24](DECISIONS.md) for why
+multi-user needs a container *per user*, not just a login.
 
 ---
 

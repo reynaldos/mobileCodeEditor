@@ -13,16 +13,18 @@ It works, on-device, off the laptop. You direct Claude from your phone, approve 
 your thumb, get pushed when it needs you, and it commits and pushes to GitHub **as you** —
 against a container on Fly.io that never sleeps.
 
-Shipped: Phase 0 (the one-screen MVP, on-device acceptance passed), Phase 1 (web push,
-on-device), the Tailwind 4 migration, containerization, the Fly deploy (Tailscale
-in-container, nothing public, no server auth), CI/CD (push to main → test → deploy),
-**Phase 2 — projects** (multi-repo clone/create/switch), and **Phase 2.5 — threads**
-(per-project conversation history with native-resume/recap). The last two are built and
-verified locally; on-device test pending. 104 tests pass.
+Shipped: Phase 0–1 (the one-screen MVP + web push, on-device), the Tailwind 4 migration,
+containerization, the Fly deploy (Tailscale in-container, nothing public, no server auth),
+CI/CD (push to main → test → deploy), **Phase 2 / 2.5 / 2.6 / 2.7** (projects, threads, build
+UX, control + editor enhancements), **Phase 3** (file browser + **editable** CodeMirror editor +
+Source control with a file-by-file commit/push review), **Phase 4** (a **terminal** — xterm.js
+over a `node-pty` WebSocket, with a mobile soft-key row), and **Phase 5** (the in-app preview).
+Everything from Phase 3 on is built and verified locally; on-device passes are pending. 275 tests
+pass.
 
-**Next:** the on-device test of Phase 2 + 2.5 (clone a second repo and hold two threads from
-the phone), then Phase 3 (files + editor) or Phase 5 (preview). The full picture, milestones,
-and reasoning are in **[docs/ROADMAP.md](docs/ROADMAP.md)**.
+**Next:** on-device verification of the editor, terminal, and source-control flows, then the rest
+of Phase 6 convenience (Vercel deploy, a project settings page). The full picture, milestones, and
+reasoning are in **[docs/ROADMAP.md](docs/ROADMAP.md)**.
 
 Deploy runbooks: **[docs/DEPLOY-FLY.md](docs/DEPLOY-FLY.md)** (what's running) and
 [docs/DEPLOY-ORACLE.md](docs/DEPLOY-ORACLE.md) (the free-tier alternative we tried first).
@@ -109,7 +111,7 @@ container is the unit of everything, and Tailscale membership is authentication.
 | [DECISIONS.md](docs/DECISIONS.md) | Every load-bearing choice and why — read this before disagreeing with one |
 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) | System design, data model, session lifecycle, security posture |
 | [PROTOCOL.md](docs/PROTOCOL.md) | Event union, HTTP surface, SSE resume contract |
-| [PHASE-0.md](docs/PHASE-0.md) · [PHASE-1.md](docs/PHASE-1.md) | Build logs for the MVP and push notifications, incl. what real use turned up |
+| Phase docs — [0](docs/PHASE-0.md), [1](docs/PHASE-1.md), [2](docs/PHASE-2.md)/[2.5](docs/PHASE-2.5.md)/[2.6](docs/PHASE-2.6.md)/[2.7](docs/PHASE-2.7.md), [3](docs/PHASE-3.md), [4](docs/PHASE-4.md), [5](docs/PHASE-5.md) | Per-phase build logs: design, as-built, and what real use turned up |
 | [DEPLOY-FLY.md](docs/DEPLOY-FLY.md) | The production deploy (what's running) |
 | [DEPLOY-ORACLE.md](docs/DEPLOY-ORACLE.md) | The free-tier alternative we tried first |
 

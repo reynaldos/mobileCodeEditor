@@ -26,7 +26,8 @@ the system as designed. Wire format is in [PROTOCOL.md](PROTOCOL.md).
 │   ├── GET  /api/events ─► SSE, honors Last-Event-ID           │
 │   ├── POST /api/prompt ─► feeds AgentSession input stream     │
 │   ├── POST /api/approvals/:id ─► resolves a pending hook      │
-│   └── (later) FS + exec RPC, WS terminal                      │
+│   ├── FS + exec RPC ─► tree/read/write, search, git ops       │
+│   └── WS /api/projects/:id/terminal ─► node-pty shell          │
 │                                                               │
 │   AgentSession ──► @anthropic-ai/claude-agent-sdk query()     │
 │        │                    │                                 │
@@ -62,7 +63,8 @@ Responsibilities, in order of importance:
 2. **Own the log.** Every SDK message becomes a row. Nothing else is durable.
 3. **Fan out.** Push newly-appended events to connected SSE clients.
 4. **Broker approvals.** Bridge a `PreToolUse` hook — a promise — to an inbound HTTP POST.
-5. Later: filesystem and exec RPC; a WebSocket terminal over node-pty.
+5. Filesystem and exec RPC (built): file browser + editable editor (`PUT /fs/file`), source
+   control, and a **WebSocket terminal over node-pty** (`routes/terminal.ts`).
 
 Note that responsibility 5 covers the file browser, editor, terminal, git, and Vercel
 surfaces all at once. They are the same operation — reach into the container's filesystem

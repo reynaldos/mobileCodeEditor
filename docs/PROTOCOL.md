@@ -179,3 +179,15 @@ nature. Only the fact that a terminal was spawned is worth remembering.
 
 Filesystem and exec RPC (the file browser, editor, git, Vercel) are ordinary
 request/response and need no events at all, beyond the audit-trail entries above.
+
+**Built (Phases 3–4), and it diverged from these sketches — for the better.** Both the file
+editor and the terminal ship with *no* new event types:
+
+- **File save** is a plain `PUT /api/projects/:id/fs/file` (`{ path, content }` → 204). A whole-file
+  write is request/response; the log has nothing to remember, so `file_saved`/`file_opened` were
+  never added.
+- **Terminal** is a raw WebSocket at `GET /api/projects/:id/terminal` (framed client→server as
+  `{type:'input'|'resize'}`, raw bytes server→client). Bytes stay off the log as planned; we don't
+  even record `terminal_spawn` — an ephemeral shell isn't worth a durable marker. The one subtlety
+  is `upgrade` sequencing against the preview reverse-proxy (see [DECISIONS #6](DECISIONS.md)), and
+  that it's an **unrestricted shell** ([DECISIONS #24](DECISIONS.md)).

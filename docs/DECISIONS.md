@@ -117,6 +117,13 @@ by the platform. You write `WHERE seq > ?` once.
 
 The terminal genuinely needs bidirectional bytes. That one's a WebSocket to node-pty.
 
+**Built (Phase 4).** The terminal WebSocket is live (`routes/terminal.ts`). One wrinkle the
+sketch didn't anticipate: the preview reverse-proxy (`@fastify/http-proxy`) installs a *single
+shared* `upgrade` listener that 404s anything it doesn't recognize, and Node fires upgrade
+listeners synchronously — so a second raw listener loses the race. The terminal takes over the
+server's upgrade handling in an `onReady` hook (after every plugin has installed its own),
+claims its path, and delegates everything else back to the proxy. See #24 for the security shape.
+
 ---
 
 ## 7. Do not log token deltas
@@ -500,3 +507,39 @@ failure leaves the commit in place and says so, both in the UI and in the note t
 **Would change our mind:** if a genuinely headless flow needs the agent to commit (a scheduled
 job with no human at the review surface), this would need a scoped, per-project opt-out. Nothing
 in the interactive product wants it.
+
+---
+
+## 24. The terminal is an unrestricted shell — safe because we're single-tenant
+
+Phase 4's terminal (`routes/terminal.ts`) spawns a real shell in the project directory over a
+WebSocket. It is **deliberately unrestricted**: unlike the agent, it does *not* go through
+`canUseTool`, and unlike the file endpoints it does *not* go through `resolveSafe`. It's your
+shell — the same thing the terminal on your laptop is. `cd /`, `rm -rf`, `curl`, whatever.
+
+That's the right call **for a single tenant**, and it rests on two things that are actually
+load-bearing, not the shell itself:
+
+- **The container boundary protects the host.** On Fly each Machine is a Firecracker microVM,
+  and the process runs **non-root** (`USER node`, no capabilities). Escaping to the host/other
+  tenants means escaping Firecracker — a very high bar. So a shell user can trash *this* container
+  (delete `/projects`, delete `/data/events.db`, exhaust RAM/CPU) but the blast radius is one
+  disposable, redeployable box.
+- **Tailscale is the perimeter** (#12). Nothing is publicly reachable; only your tailnet can open
+  a socket at all.
+
+**The line this must not cross: multi-user.** The architecture is single-tenant (#13), and a
+login screen would be a *false* fix — every user would still share one filesystem, one OS user,
+one shell, and one set of secrets (the terminal inherits `process.env`, so `env` prints the
+`CLAUDE_CODE_OAUTH_TOKEN`). User A could read and delete User B's work and steal the shared token.
+So multi-user is **a container (Fly Machine) per user**, not shared-with-auth: each user gets their
+own microVM, their own secrets (they bring their own token), and their own resource quota. The
+terminal stays "trusted" because the box only holds that user's stuff. This is exactly what #13
+means by "multi-tenancy would live *in front*."
+
+**Cheap single-tenant hardening, if wanted (not yet done):** scrub the secret env vars from the
+shell (the agent process keeps them; the shell rarely needs them), and set `ulimit`s on the PTY to
+blunt fork bombs / disk fill. Neither changes the boundary above; they just shrink the footgun.
+
+**Would change our mind:** nothing about the single-tenant model. The day this goes multi-user,
+none of the above is optional — isolation comes first, features second.
