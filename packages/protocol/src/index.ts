@@ -531,8 +531,19 @@ export interface FsTreeResponse {
   truncated: boolean
 }
 
-/** GET /api/projects/:id/fs/file?path= — a text file's contents. Read-only for v1 (PHASE-3.md design call 7); write lands with editing. */
+/** GET /api/projects/:id/fs/file?path= — a text file's contents. */
 export interface FsFileResponse {
+  path: string
+  content: string
+}
+
+/**
+ * PUT /api/projects/:id/fs/file — overwrite a text file with `content` (the
+ * editor's Save). Whole-file write; 204 on success, 400 for a bad/oversized path,
+ * 404 for an unknown project. This is a direct user edit from the app — it does
+ * NOT go through the agent's approval flow (that's for the agent's own writes).
+ */
+export interface FsWriteRequest {
   path: string
   content: string
 }

@@ -1,6 +1,6 @@
 import type { FsEntry, FsSearchMatch } from '@mce/protocol'
 import { execFile } from 'node:child_process'
-import { readdirSync, readFileSync, statSync } from 'node:fs'
+import { readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { promisify } from 'node:util'
 
@@ -79,6 +79,34 @@ export function readTextFile(root: string, relPath: string): string | undefined 
 /** A NUL byte in the first few KB is the standard, dependency-free binary sniff. */
 function looksBinary(buf: Buffer): boolean {
   return buf.subarray(0, Math.min(buf.length, 8000)).includes(0)
+}
+
+/**
+ * Overwrite a file with new text (the editor's Save — PHASE-3.md design call 7's
+ * deliberate second pass). Same `resolveSafe` guard as reads, so a path can't
+ * escape the project. Refuses to clobber a directory and caps at the same size
+ * as the reader. It writes the whole file — the editor holds the full buffer, so
+ * there's no partial/patch path to get wrong. Returns a small result the route
+ * maps to a status code.
+ */
+export function writeTextFile(root: string, relPath: string, content: string): 'ok' | 'invalid' | 'error' {
+  const file = resolveSafe(root, relPath)
+  if (!file) return 'invalid'
+  if (Buffer.byteLength(content, 'utf8') > MAX_FILE_BYTES) return 'invalid'
+
+  try {
+    let stat
+    try {
+      stat = statSync(file)
+    } catch {
+      /* new file — fine, the parent dir must already exist */
+    }
+    if (stat?.isDirectory()) return 'invalid'
+    writeFileSync(file, content, 'utf8')
+    return 'ok'
+  } catch {
+    return 'error'
+  }
 }
 
 /** Total matches returned across all files, not per file. */

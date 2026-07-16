@@ -8,6 +8,7 @@ import type {
   FsFileResponse,
   FsSearchResponse,
   FsTreeResponse,
+  FsWriteRequest,
   GithubRepo,
   GithubReposResponse,
   GitBranchesResponse,
@@ -86,6 +87,17 @@ export const previewStreamUrl = (projectId: string): string =>
 
 /** Same-origin, reverse-proxied URL for the preview iframe / "open in new tab". */
 export const previewUrl = (projectId: string): string => `${BASE}/preview/${encodeURIComponent(projectId)}/`
+
+/**
+ * WebSocket URL for a project's terminal (Phase 4). Derives ws/wss from the API
+ * origin — `BASE` when set (vite dev points at :3000), else this page's origin
+ * (prod serves the app same-origin as the server, so it's just wss://<host>).
+ */
+export const terminalSocketUrl = (projectId: string): string => {
+  const origin = BASE || window.location.origin
+  const wsOrigin = origin.replace(/^http/, 'ws') // http→ws, https→wss
+  return `${wsOrigin}/api/projects/${encodeURIComponent(projectId)}/terminal`
+}
 
 export class ApiError extends Error {
   constructor(
@@ -405,11 +417,22 @@ export async function fetchFileTree(projectId: string, path = ''): Promise<FsTre
   return (await response.json()) as FsTreeResponse
 }
 
-/** A single text file's contents. Read-only for v1 (PHASE-3.md design call 7). */
+/** A single text file's contents. */
 export async function fetchFileContent(projectId: string, path: string): Promise<FsFileResponse> {
   const response = await fetch(fsUrl(projectId, 'fs/file', { path }))
   if (!response.ok) throw new ApiError(response.status, response.statusText)
   return (await response.json()) as FsFileResponse
+}
+
+/** Overwrite a text file with new contents (the editor's Save). 204 on success. */
+export async function saveFileContent(projectId: string, path: string, content: string): Promise<void> {
+  await expectOk(
+    await fetch(fsUrl(projectId, 'fs/file'), {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ path, content } satisfies FsWriteRequest),
+    }),
+  )
 }
 
 /** ripgrep-backed content search across the project. */
