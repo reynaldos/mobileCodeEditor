@@ -4,7 +4,8 @@ import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
-import { listDir, readTextFile, resolveSafe, searchFiles } from './fs-browser.ts'
+import { listDir, readTextFile, resolveSafe, searchFiles, writeTextFile } from './fs-browser.ts'
+import { readFileSync } from 'node:fs'
 
 function fixture(): string {
   return mkdtempSync(join(tmpdir(), 'mce-fsbrowser-'))
@@ -45,6 +46,39 @@ test('resolveSafe rejects a sibling directory that merely shares the root as a s
   mkdirSync(root)
   mkdirSync(join(parent, 'app-evil'))
   assert.equal(resolveSafe(root, '../app-evil/secret.txt'), undefined)
+})
+
+// --- writeTextFile: the editor's Save --------------------------------------
+
+test('writeTextFile overwrites an existing file and round-trips through readTextFile', () => {
+  const root = fixture()
+  writeFileSync(join(root, 'a.ts'), 'old\n')
+  assert.equal(writeTextFile(root, 'a.ts', 'new content\n'), 'ok')
+  assert.equal(readFileSync(join(root, 'a.ts'), 'utf8'), 'new content\n')
+  assert.equal(readTextFile(root, 'a.ts'), 'new content\n')
+})
+
+test('writeTextFile creates a new file when the parent dir exists', () => {
+  const root = fixture()
+  mkdirSync(join(root, 'src'))
+  assert.equal(writeTextFile(root, 'src/new.ts', 'hello\n'), 'ok')
+  assert.equal(readFileSync(join(root, 'src/new.ts'), 'utf8'), 'hello\n')
+})
+
+test('writeTextFile rejects a path that escapes the root', () => {
+  const root = fixture()
+  assert.equal(writeTextFile(root, '../evil.txt', 'x'), 'invalid')
+})
+
+test('writeTextFile refuses to clobber a directory', () => {
+  const root = fixture()
+  mkdirSync(join(root, 'dir'))
+  assert.equal(writeTextFile(root, 'dir', 'x'), 'invalid')
+})
+
+test('writeTextFile errors when the parent directory does not exist', () => {
+  const root = fixture()
+  assert.equal(writeTextFile(root, 'nope/deep/file.ts', 'x'), 'error')
 })
 
 // --- listDir ------------------------------------------------------------
