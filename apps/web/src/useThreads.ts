@@ -1,5 +1,5 @@
 import type { Thread } from '@mce/protocol'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { fetchThreads } from './api.ts'
 
 /**
@@ -18,6 +18,8 @@ import { fetchThreads } from './api.ts'
 export function useThreads(projectId: string | null): { threads: Thread[]; loading: boolean; refresh: () => Promise<void> } {
   const [threads, setThreads] = useState<Thread[]>([])
   const [loading, setLoading] = useState(true)
+  const currentProjectId = useRef(projectId)
+  currentProjectId.current = projectId
 
   const refresh = useCallback(async () => {
     if (!projectId) {
@@ -25,7 +27,9 @@ export function useThreads(projectId: string | null): { threads: Thread[]; loadi
       setLoading(false)
       return
     }
-    setThreads(await fetchThreads(projectId).catch(() => [] as Thread[]))
+    const result = await fetchThreads(projectId).catch(() => [] as Thread[])
+    if (currentProjectId.current !== projectId) return // a later project switch already superseded this fetch
+    setThreads(result)
     setLoading(false)
   }, [projectId])
 
