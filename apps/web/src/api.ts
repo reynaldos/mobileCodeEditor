@@ -17,6 +17,7 @@ import type {
   GitCommitResponse,
   GitDiscardRequest,
   GitOpResponse,
+  GitPushResponse,
   GitRefreshResponse,
   GitStashListResponse,
   GitStashRequest,
@@ -489,6 +490,11 @@ export async function commitFiles(projectId: string, message: string, paths: str
 /** Discard working-tree changes for the given paths (restore to HEAD). Destructive. `ok:false` carries a git error message. */
 export async function discardFiles(projectId: string, paths: string[]): Promise<GitOpResponse> {
   return (await post<GitOpResponse>(gitPath(projectId, 'discard'), { paths } satisfies GitDiscardRequest))!
+}
+
+/** Manually push the current branch — retries a failed auto-push, or publishes a branch that has `origin` but no upstream yet. */
+export async function pushBranch(projectId: string): Promise<GitPushResponse> {
+  return (await post<GitPushResponse>(gitPath(projectId, 'push'), {}))!
 }
 
 const gitPath = (projectId: string, sub: string): string => `/api/projects/${encodeURIComponent(projectId)}/git/${sub}`

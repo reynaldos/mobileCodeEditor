@@ -104,6 +104,12 @@ export async function isDirty(cwd: string): Promise<boolean> {
   return (await git(cwd, ['status', '--porcelain'])).trim().length > 0
 }
 
+/** Whether an `origin` remote is configured — independent of whether the current branch tracks it yet. */
+export async function hasRemote(cwd: string): Promise<boolean> {
+  const remotes = (await git(cwd, ['remote'])).split('\n').map((l) => l.trim())
+  return remotes.includes('origin')
+}
+
 /**
  * Fetch the branch's remote and fast-forward the local branch onto it. Caller
  * MUST have already confirmed the tree is clean (see `isDirty`). Never merges or
@@ -191,11 +197,26 @@ export async function commitPaths(cwd: string, message: string, paths: string[])
  * Push the current branch to its upstream. Best-effort follow-on to a commit:
  * needs an upstream (returns `noUpstream` if the branch tracks no remote) and
  * network, so it's reported separately and a failure never undoes the commit.
+ *
+ * A branch cloned from a repo that had no commits yet (the GitHub "create repo"
+ * flow) has `origin` configured but no upstream tracking — there was no branch on
+ * the remote yet for `clone` to point at. Without this fallback, that project's
+ * first (and every subsequent) auto-push after a commit would report
+ * `noUpstream` forever, even though `origin` is right there. So: no upstream but
+ * `origin` exists → `push -u origin <branch>`, which both pushes and establishes
+ * tracking, same as running `git push -u origin main` by hand once.
  */
 export async function pushCurrent(cwd: string): Promise<{ ok: boolean; stderr: string; noUpstream?: boolean }> {
   const upstream = await upstreamStatus(cwd)
-  if (!upstream) return { ok: false, stderr: '', noUpstream: true }
-  const r = await tryGit(cwd, ['push'], 30_000)
+  if (upstream) {
+    const r = await tryGit(cwd, ['push'], 30_000)
+    return { ok: r.ok, stderr: r.stderr }
+  }
+
+  const branch = (await git(cwd, ['rev-parse', '--abbrev-ref', 'HEAD'])).trim()
+  if (!branch || branch === 'HEAD' || !(await hasRemote(cwd))) return { ok: false, stderr: '', noUpstream: true }
+
+  const r = await tryGit(cwd, ['push', '-u', 'origin', branch], 30_000)
   return { ok: r.ok, stderr: r.stderr }
 }
 

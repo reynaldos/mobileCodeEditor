@@ -1,6 +1,6 @@
 import type { GitStatusResponse } from '@mce/protocol'
 import type { FastifyInstance } from 'fastify'
-import { changedFiles, headSha, upstreamStatus } from '../git-changes.ts'
+import { changedFiles, hasRemote, headSha, upstreamStatus } from '../git-changes.ts'
 import type { ProjectStore } from '../projects.ts'
 
 /**
@@ -23,6 +23,9 @@ export function registerGitStatus(app: FastifyInstance, projects: ProjectStore):
     // Cheap (no network): reflects the last fetch, like `git status`. The
     // refresh endpoint is what fetches to bring these counts up to date.
     const upstream = await upstreamStatus(cwd)
-    return reply.send({ base, files, ...(upstream ? { upstream } : {}) } satisfies GitStatusResponse)
+    // `hasRemote` without `upstream` is what surfaces the Publish action — origin
+    // exists but the branch isn't tracking it yet.
+    const remote = await hasRemote(cwd)
+    return reply.send({ base, files, ...(upstream ? { upstream } : {}), hasRemote: remote } satisfies GitStatusResponse)
   })
 }

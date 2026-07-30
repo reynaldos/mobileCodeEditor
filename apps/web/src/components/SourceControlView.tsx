@@ -21,6 +21,7 @@ import {
   Plus,
   RotateCw,
   Trash2,
+  UploadCloud,
 } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import {
@@ -31,6 +32,7 @@ import {
   fetchFileDiff,
   fetchGitStatus,
   fetchStashes,
+  pushBranch,
   refreshBranch,
   stashOp,
 } from '../api.ts'
@@ -69,6 +71,7 @@ export function SourceControlView({ projectId, onOpenFile, onGitChange, onCommit
   const [selected, setSelected] = useState<Set<string>>(() => new Set())
   const [message, setMessage] = useState('')
   const [refreshing, setRefreshing] = useState(false)
+  const [publishing, setPublishing] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [opError, setOpError] = useState<string | null>(null)
@@ -239,6 +242,25 @@ export function SourceControlView({ projectId, onOpenFile, onGitChange, onCommit
     }
   }
 
+  /** Publish the current branch: retries a failed auto-push, or (the common case for a
+   *  fresh GitHub-backed project) establishes upstream tracking for the first time. */
+  async function onPublish(): Promise<void> {
+    setPublishing(true)
+    setNotice(null)
+    try {
+      const r = await pushBranch(projectId)
+      setNotice(r.ok ? `Published to \`${r.branch ?? 'the remote'}\`.` : (r.error ?? 'Publish failed.'))
+      if (r.ok) {
+        await Promise.all([loadStatus(), loadBranches()])
+        onGitChange?.() // now tracking a remote — refresh the header's branch subtitle
+      }
+    } catch {
+      setNotice('Couldn’t reach the remote.')
+    } finally {
+      setPublishing(false)
+    }
+  }
+
   if (error) return <p className="p-4 text-center text-[13px] text-del">Could not load git status.</p>
   if (!status) return <p className="p-4 text-center text-[13px] text-muted">Loading…</p>
 
@@ -369,7 +391,7 @@ export function SourceControlView({ projectId, onOpenFile, onGitChange, onCommit
         summary={<span className="truncate font-mono text-[12px] text-fg">{branches?.current ?? '…'}</span>}
       >
         <BranchList branches={branches} busy={busy} onCheckout={(b, create) => void onCheckout(b, create)} />
-        {status.upstream && (
+        {status.upstream ? (
           <BranchSync
             upstream={status.upstream}
             dirty={dirty}
@@ -377,6 +399,8 @@ export function SourceControlView({ projectId, onOpenFile, onGitChange, onCommit
             notice={notice}
             onRefresh={() => void onRefresh()}
           />
+        ) : (
+          status.hasRemote && <PublishRow publishing={publishing} notice={notice} onPublish={() => void onPublish()} />
         )}
       </Section>
 
@@ -709,6 +733,39 @@ function BranchSync({
         </p>
       )}
       {notice && !dirty && <p className="mt-2 text-[11px] text-muted">{notice}</p>}
+    </div>
+  )
+}
+
+/**
+ * The publish row (inside the Branches section): shown instead of `BranchSync`
+ * when `origin` is configured but the branch isn't tracking it yet — the state a
+ * project cloned from a brand-new (commit-less) GitHub repo lands in, since
+ * `clone` had no remote branch yet to set tracking against.
+ */
+function PublishRow({
+  publishing,
+  notice,
+  onPublish,
+}: {
+  publishing: boolean
+  notice: string | null
+  onPublish: () => void
+}): React.JSX.Element {
+  return (
+    <div className="shrink-0 border-t border-line px-3 py-2.5">
+      <div className="flex items-center gap-2">
+        <UploadCloud className="size-3.5 shrink-0 text-muted" />
+        <span className="min-w-0 flex-1 truncate text-[12px] text-muted">Not published to the remote yet</span>
+        <button
+          className="flex shrink-0 items-center gap-1.5 rounded-lg border border-line px-2.5 py-1 text-[12px] text-fg hover:bg-panel-2 disabled:opacity-50"
+          disabled={publishing}
+          onClick={onPublish}
+        >
+          {publishing ? 'Publishing…' : 'Publish'}
+        </button>
+      </div>
+      {notice && <p className="mt-2 text-[11px] text-muted">{notice}</p>}
     </div>
   )
 }

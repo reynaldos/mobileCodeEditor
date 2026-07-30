@@ -580,6 +580,12 @@ export interface GitStatusResponse {
    * endpoint below is what actually fetches.
    */
   upstream?: GitUpstream
+  /**
+   * Whether an `origin` remote is configured, regardless of whether the current
+   * branch tracks it yet. A repo cloned from a brand-new (commit-less) GitHub
+   * repo has `origin` but no upstream — that's what the Publish action is for.
+   */
+  hasRemote?: boolean
 }
 
 /** A branch's position relative to its remote-tracking ref. */
@@ -708,5 +714,22 @@ export interface GitCommitResponse {
   /** The push was attempted and failed; the commit still landed locally. */
   pushError?: string
   /** Current branch, for the confirmation/notification message. */
+  branch?: string
+}
+
+/**
+ * POST /api/projects/:id/git/push — manually push the current branch. Covers what
+ * `commit`'s best-effort push can't: retrying after a failed auto-push, or
+ * publishing commits that already existed locally. Also the action that
+ * establishes upstream tracking on a branch that has `origin` but no upstream yet
+ * (see `pushCurrent` — a fresh GitHub-backed project clone with no commits at
+ * clone time never got tracking configured, so this is where it's set up).
+ */
+export interface GitPushResponse {
+  ok: boolean
+  error?: string
+  /** No `origin` remote configured at all — nothing to publish to. */
+  noRemote?: boolean
+  /** Current branch, for the confirmation message. */
   branch?: string
 }

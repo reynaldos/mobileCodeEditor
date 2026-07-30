@@ -5,6 +5,7 @@ import type {
   GitCommitResponse,
   GitDiscardRequest,
   GitOpResponse,
+  GitPushResponse,
   GitStashListResponse,
   GitStashRequest,
 } from '@mce/protocol'
@@ -13,6 +14,7 @@ import {
   checkoutBranch,
   commitPaths,
   discardPaths,
+  hasRemote,
   isValidBranchName,
   listBranches,
   listStashes,
@@ -113,6 +115,26 @@ export function registerGitOps(app: FastifyInstance, projects: ProjectStore): vo
         ? { pushed: true }
         : { pushError: cleanGitError(push.stderr) }
     return reply.send({ ok: true, branch: current, ...pushResult } satisfies GitCommitResponse)
+  })
+
+  // Manual push: retries a failed auto-push, publishes commits that already
+  // existed locally, or (via `pushCurrent`'s fallback) establishes upstream
+  // tracking for the first time on a branch that has `origin` but no upstream —
+  // the case a fresh GitHub-backed project lands in.
+  app.post('/api/projects/:projectId/git/push', async (request, reply) => {
+    const { projectId } = request.params as { projectId: string }
+    const cwd = cwdOr404(projectId, reply)
+    if (!cwd) return reply
+
+    if (!(await hasRemote(cwd))) {
+      return reply.send({ ok: false, noRemote: true, error: 'This project has no remote to publish to.' } satisfies GitPushResponse)
+    }
+
+    const push = await pushCurrent(cwd)
+    if (!push.ok) return reply.send({ ok: false, error: cleanGitError(push.stderr) } satisfies GitPushResponse)
+
+    const { current } = await listBranches(cwd)
+    return reply.send({ ok: true, branch: current } satisfies GitPushResponse)
   })
 
   app.post('/api/projects/:projectId/git/discard', async (request, reply) => {

@@ -8,6 +8,7 @@ import {
   checkoutBranch,
   commitPaths,
   discardPaths,
+  hasRemote,
   isValidBranchName,
   listBranches,
   listStashes,
@@ -114,6 +115,38 @@ test('pushCurrent reports noUpstream for a branch that tracks no remote', async 
   const r = await pushCurrent(dir)
   assert.equal(r.ok, false)
   assert.equal(r.noUpstream, true)
+})
+
+test('hasRemote reflects whether origin is configured', async () => {
+  const dir = makeRepo()
+  assert.equal(await hasRemote(dir), false)
+
+  const bare = mkdtempSync(join(tmpdir(), 'mce-gitops-bare-'))
+  execFileSync('git', ['-C', bare, 'init', '-q', '--bare'], { stdio: 'ignore' })
+  execFileSync('git', ['-C', dir, 'remote', 'add', 'origin', bare], { stdio: 'ignore' })
+  assert.equal(await hasRemote(dir), true)
+})
+
+test('pushCurrent establishes upstream tracking on first push when origin exists but nothing is tracked yet', async () => {
+  // Simulates a project cloned from a brand-new (commit-less) GitHub repo: `origin`
+  // is configured, but there was no remote branch yet for `clone` to point tracking
+  // at — this is the root cause behind source control looking permanently "stuck".
+  const bare = mkdtempSync(join(tmpdir(), 'mce-gitops-bare-'))
+  execFileSync('git', ['-C', bare, 'init', '-q', '--bare', '-b', 'main'], { stdio: 'ignore' })
+
+  const dir = makeRepo()
+  execFileSync('git', ['-C', dir, 'remote', 'add', 'origin', bare], { stdio: 'ignore' })
+
+  const before = await pushCurrent(dir)
+  assert.ok(before.ok, before.stderr)
+  assert.equal(before.noUpstream, undefined)
+
+  const upstream = execFileSync(
+    'git',
+    ['-C', dir, 'rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{upstream}'],
+    { encoding: 'utf8' },
+  ).trim()
+  assert.equal(upstream, 'origin/main')
 })
 
 test('stash save/list/pop round-trips', async () => {
