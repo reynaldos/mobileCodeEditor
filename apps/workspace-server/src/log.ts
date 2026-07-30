@@ -237,6 +237,11 @@ export class EventLog {
     }))
   }
 
+  /** A thread's display title — same derivation `threadsOf` uses, for a single thread. */
+  threadTitleOf(projectId: string, threadId: string | null): string {
+    return this.#customTitleOf(projectId, threadId) ?? titleize(this.#firstPromptOf(projectId, threadId))
+  }
+
   /** The latest custom title for a thread, if it's been renamed. Legacy has none. */
   #customTitleOf(projectId: string, threadId: string | null): string | undefined {
     if (threadId === null) return undefined

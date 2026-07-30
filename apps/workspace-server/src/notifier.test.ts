@@ -106,7 +106,19 @@ test('turn_complete notifies only when nobody is visible', async () => {
   emit(log, { type: 'turn_complete', numTurns: 3 })
   await sleep(50)
   assert.equal(sent.length, 1)
-  assert.equal(sent[0]?.title, 'Claude finished')
+  assert.equal(sent[0]?.title, 'Claude finished — p')
+  notifier.stop()
+})
+
+test('turn_complete body names the thread it finished', async () => {
+  const { log, notifier, sent } = harness()
+
+  emit(log, { type: 'user_prompt', text: 'help me refactor the login flow' })
+  emit(log, { type: 'turn_complete', numTurns: 1 })
+  await sleep(50)
+
+  assert.equal(sent.length, 1)
+  assert.equal(sent[0]?.body, '"Refactor the login flow" is ready for your next message.')
   notifier.stop()
 })
 
@@ -160,7 +172,7 @@ test('session_ended notifies on error but not on a clean finish', async () => {
   emit(log, { type: 'session_ended', reason: 'error', message: 'boom' })
   await sleep(50)
   assert.equal(sent.length, 1)
-  assert.equal(sent[0]?.title, 'Claude hit an error')
+  assert.equal(sent[0]?.title, 'Claude hit an error — p')
   assert.equal(sent[0]?.body, 'boom')
   notifier.stop()
 })

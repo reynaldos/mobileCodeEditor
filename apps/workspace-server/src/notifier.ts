@@ -69,14 +69,18 @@ export class Notifier {
         return
 
       case 'turn_complete':
-        void this.#send({ title: 'Claude finished', body: 'Ready for your next message.', tag: 'turn' })
+        void this.#send({
+          title: `Claude finished — ${event.projectId}`,
+          body: `"${this.#threadTitle(event)}" is ready for your next message.`,
+          tag: 'turn',
+        })
         return
 
       case 'session_ended':
         if (event.reason === 'error') {
           void this.#send({
-            title: 'Claude hit an error',
-            body: event.message ?? 'The session ended unexpectedly.',
+            title: `Claude hit an error — ${event.projectId}`,
+            body: event.message ?? `"${this.#threadTitle(event)}" ended unexpectedly.`,
             tag: 'error',
           })
         }
@@ -145,6 +149,11 @@ export class Notifier {
     // The SDK already phrased this for a human, e.g. "Claude wants to edit foo.ts".
     // Never fall through to input, which could put a command on a lock screen.
     return event.title ?? `Approve a ${event.tool} action`
+  }
+
+  /** Thread display title for a conversation event — same label the threads list shows. */
+  #threadTitle(event: Extract<Event, { type: 'turn_complete' | 'session_ended' }>): string {
+    return this.#log.threadTitleOf(event.projectId, event.threadId ?? null)
   }
 
   async #send(n: { title: string; body: string; tag: string }): Promise<void> {
