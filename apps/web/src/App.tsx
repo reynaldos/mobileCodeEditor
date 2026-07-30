@@ -7,7 +7,7 @@ import { BuildModal } from './components/BuildModal.tsx'
 import { EnvDrawer } from './components/EnvDrawer.tsx'
 import { MessageList } from './components/MessageList.tsx'
 import { NotificationsButton } from './components/NotificationsButton.tsx'
-import { PreviewDrawer, PREVIEW_PEEK } from './components/PreviewDrawer.tsx'
+import { PreviewDrawer } from './components/PreviewDrawer.tsx'
 import { ProjectPicker } from './components/ProjectPicker.tsx'
 import { PromptBox } from './components/PromptBox.tsx'
 import { StatusDot } from './components/StatusDot.tsx'
@@ -30,6 +30,15 @@ const ExplorerDrawer = lazy(() => import('./components/ExplorerDrawer.tsx').then
 /** xterm.js (+ its addon) is heavy and most sessions never open a terminal — its own chunk, loaded on first open. */
 const TerminalDrawer = lazy(() => import('./components/TerminalDrawer.tsx').then((m) => ({ default: m.TerminalDrawer })))
 
+/**
+ * Shared peek-strip height (px) for every peekable drawer (preview, terminal,
+ * explorer, env) — matches each drawer's own `*_PEEK` export. Kept as a plain
+ * number here (not imported from the drawers) so this file doesn't statically
+ * pull in the lazy-loaded Explorer/Terminal chunks (CodeMirror, xterm) just to
+ * read a constant.
+ */
+const PEEK_PX = 72
+
 /** Which overlay is up, if any. null = the conversation (or the thread list — see `activeThreadId`). */
 type Overlay = 'projects' | null
 
@@ -42,6 +51,10 @@ export function App(): React.JSX.Element {
   const [health, setHealth] = useState<Health | undefined>()
   const [overlay, setOverlay] = useState<Overlay>(null)
   const [envOpen, setEnvOpen] = useState(false)
+  // Full-height vs peeked-strip for every drawer below, mirroring `usePreview`'s
+  // `raised` — lowering to the peek strip keeps whatever's inside alive instead
+  // of losing it to a full close.
+  const [envRaised, setEnvRaised] = useState(true)
   // The explorer's target project persists through a close (mirrors `usePreview`'s
   // `projectId`) so the drawer can play its close animation instead of unmounting
   // instantly — and so it can be opened for a project row that isn't the active
@@ -51,25 +64,32 @@ export function App(): React.JSX.Element {
   // A file to open on the Explorer's file view (from a thread changes card's "View file"), or null.
   const [explorerFile, setExplorerFile] = useState<string | null>(null)
   const [explorerOpen, setExplorerOpen] = useState(false)
+  const [explorerRaised, setExplorerRaised] = useState(true)
   const openExplorer = useCallback((projectId: string, view: 'tree' | 'source-control') => {
     setExplorerProjectId(projectId)
     setExplorerView(view)
     setExplorerFile(null)
     setExplorerOpen(true)
+    setExplorerRaised(true)
   }, [])
   const openExplorerFile = useCallback((projectId: string, path: string) => {
     setExplorerProjectId(projectId)
     setExplorerView('tree')
     setExplorerFile(path)
     setExplorerOpen(true)
+    setExplorerRaised(true)
   }, [])
   // The terminal drawer's target project persists through a close so it can play
   // its close animation (mirrors the explorer/preview drawers).
   const [terminalProjectId, setTerminalProjectId] = useState<string | null>(null)
   const [terminalOpen, setTerminalOpen] = useState(false)
+  // Full-height vs peeked-strip, mirroring `usePreview`'s `raised` — lowering to
+  // the peek strip keeps the shell alive instead of closing it outright.
+  const [terminalRaised, setTerminalRaised] = useState(true)
   const openTerminal = useCallback((projectId: string) => {
     setTerminalProjectId(projectId)
     setTerminalOpen(true)
+    setTerminalRaised(true)
   }, [])
   const builds = useBuilds(state)
   const preview = usePreview(state.preview)
@@ -151,16 +171,23 @@ export function App(): React.JSX.Element {
   // priority — a project that's still cloning has no threads worth showing.
   const showThreadsHome = activeProjectId !== null && activeThreadId === null && !showBuild
 
+  // Every peekable drawer shares one strip height. Stacked bottom-to-top —
+  // preview, terminal, explorer, env — so if more than one happens to be
+  // peeked at once, their strips sit above one another instead of overlapping.
+  const previewPeekPx = preview.projectId !== null && !preview.raised ? PEEK_PX : 0
+  const terminalPeekPx = terminalProjectId !== null && terminalOpen && !terminalRaised ? PEEK_PX : 0
+  const explorerPeekPx = explorerProjectId !== null && explorerOpen && !explorerRaised ? PEEK_PX : 0
+  const envPeekPx = envOpen && !envRaised ? PEEK_PX : 0
+  const terminalOffsetPx = previewPeekPx
+  const explorerOffsetPx = previewPeekPx + terminalPeekPx
+  const envOffsetPx = previewPeekPx + terminalPeekPx + explorerPeekPx
+  const totalPeekPx = envOffsetPx + envPeekPx
+
   return (
-    // `app` owns 100dvh and the keyboard inset. See styles.css. When a preview is
-    // peeked (open but lowered), `--preview-peek` reserves room at the bottom so
-    // the peeked bar doesn't sit on top of the prompt box.
-    <div
-      className="app flex flex-col"
-      style={
-        { '--preview-peek': preview.projectId !== null && !preview.raised ? PREVIEW_PEEK : '0px' } as React.CSSProperties
-      }
-    >
+    // `app` owns 100dvh and the keyboard inset. See styles.css. When any drawer
+    // is peeked (open but lowered), `--drawer-peek` reserves room at the bottom
+    // so the peeked bar(s) don't sit on top of the prompt box.
+    <div className="app flex flex-col" style={{ '--drawer-peek': `${totalPeekPx}px` } as React.CSSProperties}>
       <header className="flex shrink-0 items-center justify-between gap-3 border-b border-line bg-panel px-3.5 pb-2.5 pt-[calc(10px+env(safe-area-inset-top,0px))]">
         <button className="flex min-w-0 flex-col items-start" onClick={() => setOverlay('projects')} title="Switch project">
           <span className="flex min-w-0 items-center gap-1.5">
@@ -194,7 +221,10 @@ export function App(): React.JSX.Element {
                   key: 'env',
                   label: 'Environment (.env)',
                   icon: KeyRound,
-                  onClick: () => setEnvOpen(true),
+                  onClick: () => {
+                    setEnvOpen(true)
+                    setEnvRaised(true)
+                  },
                 },
                 {
                   key: 'explorer',
@@ -310,7 +340,16 @@ export function App(): React.JSX.Element {
         />
       )}
 
-      {activeProjectId && <EnvDrawer projectId={activeProjectId} open={envOpen} onOpenChange={setEnvOpen} />}
+      {activeProjectId && (
+        <EnvDrawer
+          projectId={activeProjectId}
+          open={envOpen}
+          raised={envRaised}
+          onRaisedChange={setEnvRaised}
+          onOpenChange={setEnvOpen}
+          bottomOffset={`${envOffsetPx}px`}
+        />
+      )}
 
       {explorerProjectId && (
         <Suspense fallback={null}>
@@ -322,7 +361,10 @@ export function App(): React.JSX.Element {
             initialView={explorerView}
             initialFile={explorerFile ?? undefined}
             open={explorerOpen}
+            raised={explorerRaised}
+            onRaisedChange={setExplorerRaised}
             onOpenChange={setExplorerOpen}
+            bottomOffset={`${explorerOffsetPx}px`}
             onGitChange={() => void projectsState.refresh()}
             onCommitted={(summary) => {
               // Tell the agent the commit happened — but only when Source control is
@@ -343,7 +385,10 @@ export function App(): React.JSX.Element {
             projectId={terminalProjectId}
             projectName={projects.find((p) => p.id === terminalProjectId)?.name ?? terminalProjectId}
             open={terminalOpen}
+            raised={terminalRaised}
+            onRaisedChange={setTerminalRaised}
             onOpenChange={setTerminalOpen}
+            bottomOffset={`${terminalOffsetPx}px`}
           />
         </Suspense>
       )}

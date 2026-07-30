@@ -1,22 +1,31 @@
 import type { EnvEntry } from '@mce/protocol'
-import { ClipboardPaste, Eye, EyeOff, Loader, Plus, Trash2 } from 'lucide-react'
+import { ChevronDown, ClipboardPaste, Eye, EyeOff, Loader, Plus, Trash2 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { fetchEnv, initEnv, saveEnv } from '../api.ts'
 import { looksLikeEnvBlock, mergeEnvEntries, parseEnvBlock } from '../env.ts'
-import { Drawer, DrawerContent, DrawerDescription, DrawerHeader, DrawerTitle } from './ui/drawer.tsx'
+import { PeekableDrawer } from './ui/peekable-drawer.tsx'
+
+/** Peeked-strip height — shared with every other peekable drawer. */
+export const ENV_PEEK = '72px'
 
 interface Props {
   projectId: string | null
   open: boolean
+  /** Full-height vs peeked-strip. Meaningless while `open` is false. */
+  raised: boolean
+  onRaisedChange: (raised: boolean) => void
   onOpenChange: (open: boolean) => void
+  /** Other peeked drawers' combined peek height below this one in the stack, so peek strips don't overlap. */
+  bottomOffset?: string
 }
 
 /**
  * Edits a project's `.env` directly. The UI is a view over the file — Save writes
  * the whole file (no abstraction, no separate store). Values are masked by default
- * since they're secrets; a toggle reveals them.
+ * since they're secrets; a toggle reveals them. Minimizing (instead of closing)
+ * keeps unsaved edits in the form alive.
  */
-export function EnvDrawer({ projectId, open, onOpenChange }: Props): React.JSX.Element {
+export function EnvDrawer({ projectId, open, raised, onRaisedChange, onOpenChange, bottomOffset }: Props): React.JSX.Element {
   const [entries, setEntries] = useState<EnvEntry[]>([])
   const [hasExample, setHasExample] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -97,23 +106,40 @@ export function EnvDrawer({ projectId, open, onOpenChange }: Props): React.JSX.E
   }
 
   return (
-    <Drawer open={open} onOpenChange={onOpenChange}>
-      <DrawerContent>
-        <DrawerHeader>
-          <div className="flex items-center justify-between">
-            <DrawerTitle>Environment · .env</DrawerTitle>
+    <PeekableDrawer
+      open={open}
+      raised={raised}
+      onRaisedChange={onRaisedChange}
+      onOpenChange={onOpenChange}
+      peekHeight={ENV_PEEK}
+      bottomOffset={bottomOffset}
+      title="Environment · .env"
+    >
+      <div className="flex flex-col gap-1 p-4">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex min-w-0 items-center gap-1">
             <button
-              className="flex items-center gap-1.5 text-[12px] text-muted hover:text-fg"
-              onClick={() => setReveal((r) => !r)}
+              className="flex size-8 shrink-0 items-center justify-center rounded-md text-muted hover:bg-panel-2"
+              aria-label="Minimize"
+              title="Minimize"
+              onClick={() => onRaisedChange(false)}
             >
-              {reveal ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
-              {reveal ? 'Hide' : 'Show'} values
+              <ChevronDown className="size-4" />
             </button>
+            <span className="truncate text-[17px] font-semibold text-fg">Environment · .env</span>
           </div>
-          <DrawerDescription>Written straight to the project&rsquo;s .env file on save.</DrawerDescription>
-        </DrawerHeader>
+          <button
+            className="flex shrink-0 items-center gap-1.5 text-[12px] text-muted hover:text-fg"
+            onClick={() => setReveal((r) => !r)}
+          >
+            {reveal ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+            {reveal ? 'Hide' : 'Show'} values
+          </button>
+        </div>
+        <p className="text-[13px] text-muted">Written straight to the project&rsquo;s .env file on save.</p>
+      </div>
 
-        <div className="flex min-h-0 flex-1 flex-col gap-2 px-4 pb-[calc(16px+env(safe-area-inset-bottom,0px))]">
+      <div className="flex min-h-0 flex-1 flex-col gap-2 px-4 pb-[calc(16px+env(safe-area-inset-bottom,0px))]">
           {loading ? (
             <div className="flex items-center gap-2 py-8 text-[13px] text-muted">
               <Loader className="size-4 animate-spin" /> loading…
@@ -237,7 +263,6 @@ export function EnvDrawer({ projectId, open, onOpenChange }: Props): React.JSX.E
             </>
           )}
         </div>
-      </DrawerContent>
-    </Drawer>
+    </PeekableDrawer>
   )
 }
