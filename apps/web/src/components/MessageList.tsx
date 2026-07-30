@@ -188,7 +188,7 @@ function ToolGroupRow({ group, projectId }: { group: ToolGroup; projectId?: stri
             <DrawerTitle>{label}</DrawerTitle>
             {summary && <DrawerDescription>{summary}</DrawerDescription>}
           </DrawerHeader>
-          <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto px-4 pb-[calc(16px+env(safe-area-inset-bottom,0px))]">
+          <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto px-4 pb-[calc(16px+env(safe-area-inset-bottom,0px))] [&>*]:shrink-0">
             {group.tools.map((t) => (
               <Row key={t.key} item={t} projectId={projectId} />
             ))}
@@ -305,7 +305,7 @@ function SubagentRow({ sub, projectId }: { sub: SubagentItem; projectId?: string
             <DrawerTitle>{title}</DrawerTitle>
             {sub.description && <DrawerDescription>{sub.description}</DrawerDescription>}
           </DrawerHeader>
-          <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto px-4 pb-[calc(16px+env(safe-area-inset-bottom,0px))]">
+          <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto px-4 pb-[calc(16px+env(safe-area-inset-bottom,0px))] [&>*]:shrink-0">
             {sub.tools.map((t) => (
               <Row key={t.key} item={t} projectId={projectId} />
             ))}
