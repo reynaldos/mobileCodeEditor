@@ -6,6 +6,7 @@ import { Github } from './github.ts'
 import { EventLog } from './log.ts'
 import { Notifier } from './notifier.ts'
 import { Presence } from './presence.ts'
+import { buildPreviewOriginServer } from './preview-origin-server.ts'
 import { PreviewManager } from './preview-manager.ts'
 import { PreviewTracker } from './preview-tracker.ts'
 import { ProjectStore } from './projects.ts'
@@ -66,8 +67,12 @@ const app = await buildServer(config, {
   previews,
   previewTracker,
 })
+const previewOriginApp = buildPreviewOriginServer(config, previewTracker)
 
-await app.listen({ port: config.port, host: config.host })
+await Promise.all([
+  app.listen({ port: config.port, host: config.host }),
+  previewOriginApp.listen({ port: config.previewOriginPort, host: config.host }),
+])
 app.log.info(
   {
     projectsRoot: config.projectsRoot,
@@ -97,7 +102,7 @@ for (const signal of ['SIGINT', 'SIGTERM'] as const) {
       previews.disposeActive()
       // Sessions first: stop() denies parked approvals so nothing hangs.
       await sessions.shutdown()
-      await app.close()
+      await Promise.all([app.close(), previewOriginApp.close()])
       db.close()
       lock.release()
       process.exit(0)

@@ -26,6 +26,7 @@ const BASE: Omit<Config, 'projectsRoot' | 'projectPath' | 'projectId'> = {
   webDist: '/nonexistent',
   vapid: undefined,
   previewPort: 0,
+  previewOriginPort: 0,
   previewIdleTimeoutMs: 30 * 60 * 1000,
 }
 

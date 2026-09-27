@@ -53,6 +53,7 @@ const DEV: Config = {
   webDist: '/nonexistent-so-static-serving-is-skipped',
   vapid: undefined,
   previewPort: 0,
+  previewOriginPort: 0,
   previewIdleTimeoutMs: 30 * 60 * 1000,
 }
 
@@ -540,65 +541,6 @@ test('POST /api/uploads/images with no files is a 400', async () => {
   const { base } = await boot()
   const response = await fetch(`${base}/api/uploads/images`, { method: 'POST', body: new FormData() })
   assert.equal(response.status, 400)
-})
-
-// ---------------------------------------------------------------------------
-// Preview navigation containment: an absolute-path link inside the previewed app
-// (`<a href="/about">`, a logo/Home → `/`) resolves at the app origin and would
-// otherwise load the whole workspace app inside the preview iframe (nested-preview
-// bug). When a preview is active and the request came from inside it, bounce it
-// back into the preview.
-
-test('a preview-escaped absolute link redirects back into the active preview', async () => {
-  const { base, previewTracker } = await boot()
-  previewTracker.start('app', 'vite')
-
-  const res = await fetch(`${base}/about`, {
-    headers: { referer: `${base}/preview/app/` },
-    redirect: 'manual',
-  })
-  assert.equal(res.status, 302)
-  assert.equal(res.headers.get('location'), '/preview/app/about')
-})
-
-test('a preview home link ("/") redirects into the preview root, not the app shell', async () => {
-  const { base, previewTracker } = await boot()
-  previewTracker.start('app', 'vite')
-
-  const res = await fetch(`${base}/`, {
-    headers: { referer: `${base}/preview/app/about` },
-    redirect: 'manual',
-  })
-  assert.equal(res.status, 302)
-  assert.equal(res.headers.get('location'), '/preview/app/')
-})
-
-test('a top-level app request (no /preview/ referer) is NOT hijacked by an active preview', async () => {
-  const webDist = mkdtempSync(join(tmpdir(), 'mce-dist-'))
-  writeFileSync(join(webDist, 'index.html'), '<!doctype html><title>mce</title>')
-  const { base, previewTracker } = await boot({ ...DEV, webDist })
-  previewTracker.start('app', 'vite')
-
-  const res = await fetch(`${base}/settings`, { headers: { referer: `${base}/` }, redirect: 'manual' })
-  assert.equal(res.status, 200)
-  assert.match(await res.text(), /<title>mce<\/title>/, 'still the SPA shell, not a redirect')
-})
-
-test('preview containment never touches /api requests, even with a /preview/ referer', async () => {
-  const { base, previewTracker } = await boot()
-  previewTracker.start('app', 'vite')
-
-  const res = await fetch(`${base}/api/nope`, { headers: { referer: `${base}/preview/app/` }, redirect: 'manual' })
-  // A 404 (not a 302) proves the hook left it alone — the exact body depends on
-  // whether a web build is present, which isn't what this test is about.
-  assert.equal(res.status, 404)
-  assert.notEqual(res.headers.get('location'), '/preview/app/api/nope')
-})
-
-test('with no preview active, an escaped-looking request is not redirected', async () => {
-  const { base } = await boot()
-  const res = await fetch(`${base}/about`, { headers: { referer: 'http://x/preview/app/' }, redirect: 'manual' })
-  assert.notEqual(res.status, 302)
 })
 
 test('POST /api/prompt with an unknown imageId is a 400, not a silent drop', async () => {

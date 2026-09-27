@@ -86,8 +86,17 @@ export const buildStreamUrl = (projectId: string): string =>
 export const previewStreamUrl = (projectId: string): string =>
   `${BASE}/api/projects/${encodeURIComponent(projectId)}/preview/stream`
 
-/** Same-origin, reverse-proxied URL for the preview iframe / "open in new tab". */
-export const previewUrl = (projectId: string): string => `${BASE}/preview/${encodeURIComponent(projectId)}/`
+/**
+ * The preview's own dedicated origin — same host as the main app, different
+ * port (see DECISIONS — dropping the /preview/:projectId/ path-prefix scheme).
+ * Derived by swapping just the port on the current API origin, same pattern
+ * as `terminalSocketUrl`'s ws/wss derivation below.
+ */
+export const previewOrigin = (port: number): string => {
+  const url = new URL(BASE || window.location.origin)
+  url.port = String(port)
+  return url.origin
+}
 
 /**
  * WebSocket URL for a project's terminal (Phase 4). Derives ws/wss from the API
@@ -396,6 +405,7 @@ export interface Health {
   liveSessions: number
   agentReady: boolean
   pushReady: boolean
+  previewOriginPort: number
 }
 
 export async function fetchHealth(): Promise<Health> {

@@ -33,6 +33,13 @@ export interface Config {
    * defaults (3000, 5173, 8080).
    */
   readonly previewPort: number
+  /**
+   * Preview's own dedicated origin (not the path-prefix scheme — see DECISIONS,
+   * the entry on dropping `/preview/:projectId/`). Doubles as the internal bind
+   * port for the second listener and the external `tailscale serve --https=`
+   * port docker-entrypoint.sh maps to it — no reason for those to differ.
+   */
+  readonly previewOriginPort: number
   /** How long a preview can sit with nobody looking (Presence.anyVisible false) before it auto-stops. */
   readonly previewIdleTimeoutMs: number
   /** The PWA build. Served from this same origin, which is why CORS exists only in dev. */
@@ -94,6 +101,7 @@ export function loadConfig(): Config {
     webDist: resolve(process.env.WEB_DIST ?? new URL('../../web/dist', import.meta.url).pathname),
     vapid: loadVapid(),
     previewPort: Number(process.env.PREVIEW_PORT ?? 4999),
+    previewOriginPort: Number(process.env.PREVIEW_ORIGIN_PORT ?? 8443),
     previewIdleTimeoutMs: Number(process.env.PREVIEW_IDLE_TIMEOUT_MS ?? 30 * 60 * 1000),
   }
 }

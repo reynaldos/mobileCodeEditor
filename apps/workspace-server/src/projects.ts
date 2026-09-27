@@ -323,15 +323,9 @@ export interface DevCommand {
   cmd: string
   args: string[]
   /**
-   * Vite accepts a subpath `--base` override at spawn time, which the preview
-   * reverse-proxy uses to run it transparently under `/preview/<projectId>/`
-   * (see PHASE-5.md's spike result). Next.js has no CLI equivalent — its
-   * `basePath` is config-file-only — so it's spawned at root instead and the
-   * proxy special-cases its fixed `/_next/*` asset path (Phase 6, server.ts).
-   * Create React App (`cra`) is the same shape as Next here: `react-scripts`
-   * takes no subpath flag either (only a `PORT`/`HOST` env pair), so it's
-   * spawned at root too and the proxy special-cases its fixed `/static/*` and
-   * `/ws` paths (server.ts).
+   * All three are spawned at root and reverse-proxied root-to-root through the
+   * preview's own dedicated origin (preview-origin-server.ts) — there's no
+   * subpath for any of them to line up with, unlike the old path-prefix scheme.
    */
   framework: 'vite' | 'next' | 'cra'
   /**

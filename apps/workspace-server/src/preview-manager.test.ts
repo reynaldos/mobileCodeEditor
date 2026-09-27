@@ -68,7 +68,7 @@ function makePreviewableProject(root: string, name: string): void {
   )
 }
 
-/** A project directory `detectDevCommand` recognizes as Next.js (Phase 6) — same fake HTTP listener, parses `-p` instead of `--base`/`--port`/`--host`. */
+/** A project directory `detectDevCommand` recognizes as Next.js (Phase 6) — same fake HTTP listener, parses `-p` instead of `--port`/`--host`. */
 function makeNextPreviewableProject(root: string, name: string): void {
   const dir = join(root, name)
   mkdirSync(dir)
@@ -143,6 +143,7 @@ function config(port: number, idleTimeoutMs = 30 * 60 * 1000): Config {
     webDist: '/nonexistent',
     vapid: undefined,
     previewPort: port,
+    previewOriginPort: 0,
     previewIdleTimeoutMs: idleTimeoutMs,
   }
 }
@@ -170,7 +171,7 @@ test('start spawns the detected dev command, polls the port, and reaches running
   await manager.stop('demo', 'closed')
 })
 
-test('start spawns a Next.js dev command with -p/-H instead of Vite\'s --base/--port/--host, and tracks its framework', async () => {
+test('start spawns a Next.js dev command with -p/-H instead of Vite\'s --port/--host, and tracks its framework', async () => {
   const { root, log, projects, presence, port } = freshFixture()
   makeNextPreviewableProject(root, 'demo-next')
   const tracker = new PreviewTracker()

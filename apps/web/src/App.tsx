@@ -395,7 +395,7 @@ export function App(): React.JSX.Element {
 
       {/* Mounted regardless of the active project — a peeked preview for a project you've since
           navigated away from in the main nav stays alive and visible, per PHASE-5.md design call 7. */}
-      <PreviewDrawer preview={preview} projects={projects} />
+      <PreviewDrawer preview={preview} projects={projects} previewOriginPort={health?.previewOriginPort} />
     </div>
   )
 }

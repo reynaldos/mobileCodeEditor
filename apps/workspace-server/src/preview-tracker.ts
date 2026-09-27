@@ -61,7 +61,7 @@ export class PreviewTracker {
     return this.#active && !isTerminal(this.#active.phase) ? this.#active.projectId : undefined
   }
 
-  /** The framework of the project currently holding the slot — server.ts's proxy needs this to route Next.js's `/_next/*` and CRA's `/static/*`/`/ws` assets. */
+  /** The framework of the project currently holding the slot. */
   activeFramework(): 'vite' | 'next' | 'cra' | undefined {
     return this.#active && !isTerminal(this.#active.phase) ? this.#active.framework : undefined
   }

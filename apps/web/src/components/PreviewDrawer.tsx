@@ -2,7 +2,7 @@ import type { Project } from '@mce/protocol'
 import { ChevronDown, ChevronUp, Loader, Power, RotateCw, Terminal, TriangleAlert, X } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Drawer as Vaul } from 'vaul'
-import { previewUrl } from '../api.ts'
+import { previewOrigin } from '../api.ts'
 import type { Preview } from '../usePreview.ts'
 import { usePreviewStream } from '../usePreviewStream.ts'
 import { ActionsMenu } from './ActionsMenu.tsx'
@@ -21,6 +21,8 @@ const FULL = 0.95
 interface Props {
   preview: Preview
   projects: Project[]
+  /** From /api/health. Undefined only in the brief window before that first fetch resolves. */
+  previewOriginPort: number | undefined
 }
 
 /**
@@ -33,7 +35,7 @@ interface Props {
  * Non-modal (no backdrop): peeking is meant to let you keep using the thread
  * underneath, not merely glimpse it behind a dimmed overlay.
  */
-export function PreviewDrawer({ preview, projects }: Props): React.JSX.Element {
+export function PreviewDrawer({ preview, projects, previewOriginPort }: Props): React.JSX.Element {
   const { projectId, raised, startError, conflictWith, confirmEvict, cancelConflict, raise, peek, close } = preview
   const stream = usePreviewStream(projectId)
   const [ready, setReady] = useState(false)
@@ -43,9 +45,13 @@ export function PreviewDrawer({ preview, projects }: Props): React.JSX.Element {
   const [iframeLoaded, setIframeLoaded] = useState(false)
   const [showTerminal, setShowTerminal] = useState(false)
   // The iframe's live location, shown in the URL box so it tracks where the user
-  // navigates. Null until the first read → the box falls back to the base URL.
+  // navigates. Null until the first report → the box falls back to the origin.
   const [currentUrl, setCurrentUrl] = useState<string | null>(null)
-  const iframeRef = useRef<HTMLIFrameElement>(null)
+  // Bumped by refresh() and on every projectId change, to force the iframe to
+  // remount — its src is the preview's dedicated origin, which doesn't change
+  // between projects or across a manual refresh, so React wouldn't otherwise
+  // know to reload it.
+  const [reloadNonce, setReloadNonce] = useState(0)
   const contentRef = useRef<HTMLDivElement>(null)
 
   // A fresh projectId is a fresh preview instance — nothing carries over.
@@ -54,35 +60,17 @@ export function PreviewDrawer({ preview, projects }: Props): React.JSX.Element {
     setIframeLoaded(false)
     setShowTerminal(false)
     setCurrentUrl(null)
+    setReloadNonce((n) => n + 1)
   }, [projectId])
 
   useEffect(() => {
     if (stream.phase === 'running') setReady(true)
   }, [stream.phase])
 
-  // Reflect where the user has navigated. The preview is same-origin, so reading
-  // the iframe's location just works. `onLoad` catches full navigations (our
-  // in-preview redirects included); the poll catches SPA pushState, which fires
-  // no load event. Runs only while the preview is up and raised.
-  const syncUrl = useCallback(() => {
-    try {
-      const href = iframeRef.current?.contentWindow?.location?.href
-      if (href && href !== 'about:blank') setCurrentUrl(href)
-    } catch {
-      /* cross-origin read blocked (shouldn't happen for a same-origin preview) — keep the last */
-    }
-  }, [])
-
-  useEffect(() => {
-    if (!raised || !ready) return
-    const id = setInterval(syncUrl, 750)
-    return () => clearInterval(id)
-  }, [raised, ready, syncUrl])
-
-  // In dev the preview is a *different origin* (Vite :5173 vs the proxy :3000),
-  // so the poll above can't read its location — the frame reports it instead, via
-  // the script injected into its HTML (see server.ts). Trust only the shape we
-  // injected; a preview page could carry any other postMessage traffic.
+  // The preview lives at its own dedicated origin (see DECISIONS), so the parent
+  // can't read the iframe's location directly — the frame reports it instead, via
+  // the script injected into its HTML (see preview-origin-server.ts). Trust only
+  // the shape we injected; a preview page could carry any other postMessage traffic.
   useEffect(() => {
     const onMessage = (e: MessageEvent): void => {
       const url = (e.data as { __mcePreviewUrl?: unknown } | null)?.__mcePreviewUrl
@@ -131,17 +119,12 @@ export function PreviewDrawer({ preview, projects }: Props): React.JSX.Element {
     }
   }, [projectId, raised])
 
-  // Reload the current page in the iframe (same-origin, so this just works).
-  // Drop `iframeLoaded` so the spinner covers the reload instead of flashing white.
+  // Reload the preview. The iframe is cross-origin, so there's no direct
+  // `contentWindow.location.reload()` to call — remount it instead. Drop
+  // `iframeLoaded` so the spinner covers the reload instead of flashing white.
   const refresh = useCallback(() => {
-    const frame = iframeRef.current
-    if (!frame) return
     setIframeLoaded(false)
-    try {
-      frame.contentWindow?.location.reload()
-    } catch {
-      frame.src = frame.src // cross-origin fallback (shouldn't happen)
-    }
+    setReloadNonce((n) => n + 1)
   }, [])
 
   const nameOf = (id: string | null): string => (id && (projects.find((p) => p.id === id)?.name ?? id)) || ''
@@ -210,7 +193,7 @@ export function PreviewDrawer({ preview, projects }: Props): React.JSX.Element {
               <div className="pointer-events-auto shrink-0 px-4 pb-2">
                 <input
                   readOnly
-                  value={currentUrl ?? displayUrl(projectId)}
+                  value={currentUrl ?? (previewOriginPort ? previewOrigin(previewOriginPort) : '')}
                   onFocus={(e) => e.currentTarget.select()}
                   aria-label="Preview URL"
                   className="w-full truncate rounded-md border border-line bg-panel-2 px-2.5 py-1.5 font-mono text-[12px] text-muted focus:outline-none"
@@ -231,15 +214,12 @@ export function PreviewDrawer({ preview, projects }: Props): React.JSX.Element {
                       app can't open a new browser tab (which pops out of and locks the
                       PWA) nor navigate the top frame. Its own in-app routing still works
                       — that's the iframe navigating itself, which is always allowed. */}
-                  {ready && projectId && (
+                  {ready && projectId && previewOriginPort && (
                     <iframe
-                      ref={iframeRef}
-                      src={previewUrl(projectId)}
+                      key={`${projectId}-${reloadNonce}`}
+                      src={previewOrigin(previewOriginPort)}
                       title={`Preview: ${nameOf(projectId)}`}
-                      onLoad={() => {
-                        setIframeLoaded(true)
-                        syncUrl()
-                      }}
+                      onLoad={() => setIframeLoaded(true)}
                       className="w-full flex-1 border-0 bg-white"
                     />
                   )}
@@ -317,12 +297,4 @@ export function PreviewDrawer({ preview, projects }: Props): React.JSX.Element {
       </Dialog>
     </>
   )
-}
-
-/** Absolute address of a project's preview, for the readonly URL box. `previewUrl`
- *  is same-origin and usually relative (`/preview/<id>/`); show it with the origin
- *  so the box reads as a real URL. */
-function displayUrl(projectId: string): string {
-  const u = previewUrl(projectId)
-  return u.startsWith('http') ? u : `${window.location.origin}${u}`
 }

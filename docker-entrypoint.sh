@@ -20,6 +20,9 @@ export PORT="${PORT:-3000}"
 export DB_PATH=/data/events.db
 export UPLOADS_ROOT=/data/uploads
 export WEB_DIST=/app/apps/web/dist
+# Preview's own dedicated origin — doubles as the second listener's internal
+# bind port and the external tailscale serve --https= port below.
+export PREVIEW_ORIGIN_PORT="${PREVIEW_ORIGIN_PORT:-8443}"
 # Projects live under a root, not a single pinned path: the in-app picker owns
 # creation and every directory under the root is a project. PROJECTS_ROOT is
 # overridable, unlike the fixed paths above — on Fly everything (log, projects,
@@ -101,6 +104,11 @@ if [ -n "${TS_AUTHKEY:-}" ]; then
   # Proxy the tailnet HTTPS endpoint to the local server. Idempotent on restart.
   tailscale --socket=/var/run/tailscale/tailscaled.sock serve --bg \
     "http://127.0.0.1:${PORT}" || echo "warning: tailscale serve failed" >&2
+
+  # Second mapping, same tailnet hostname: the preview's own dedicated origin
+  # (see DECISIONS — dropping the /preview/:projectId/ path-prefix scheme).
+  tailscale --socket=/var/run/tailscale/tailscaled.sock serve --bg --https="$PREVIEW_ORIGIN_PORT" \
+    "http://127.0.0.1:$PREVIEW_ORIGIN_PORT" || echo "warning: tailscale serve (preview origin) failed" >&2
 fi
 
 if [ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then

@@ -127,7 +127,7 @@ export class PreviewManager {
     // directory). Going straight to the binary sidesteps the disagreement
     // entirely, for every package manager and framework alike.
     const bin = resolveDevBin(dev.cwd, path, BIN_NAME[dev.framework])
-    const { args, env: frameworkEnv } = devArgsFor(dev.framework, projectId, this.#port)
+    const { args, env: frameworkEnv } = devArgsFor(dev.framework, this.#port)
 
     // detached: true puts the child in its own process group. Next and Vite
     // don't need this to reach their own process (they're now the direct
@@ -319,22 +319,17 @@ function resolveDevBin(cwd: string, projectRoot: string, binName: string): strin
 
 /**
  * Per-framework CLI args, and (CRA only) env overrides — `react-scripts`
- * takes no port/host CLI flags at all, only `PORT`/`HOST` env vars. Vite
- * gets `--base` so its own emitted asset/HMR paths line up with the proxy's
- * `/preview/:projectId/*` mount (confirmed by the PHASE-5.md spike). Next
- * and CRA have no equivalent flag — both are spawned at root instead, and
- * the proxy special-cases their fixed absolute asset paths (server.ts).
+ * takes no port/host CLI flags at all, only `PORT`/`HOST` env vars. All three
+ * frameworks are spawned at root: the preview has its own dedicated origin
+ * (preview-origin-server.ts), so there's no path prefix for any of them to
+ * line up with.
  */
-function devArgsFor(
-  framework: DevCommand['framework'],
-  projectId: string,
-  port: number,
-): { args: string[]; env: NodeJS.ProcessEnv } {
+function devArgsFor(framework: DevCommand['framework'], port: number): { args: string[]; env: NodeJS.ProcessEnv } {
   switch (framework) {
     case 'next':
       return { args: ['dev', '-p', String(port), '-H', '0.0.0.0'], env: {} }
     case 'vite':
-      return { args: ['--base', `/preview/${projectId}/`, '--port', String(port), '--host'], env: {} }
+      return { args: ['--port', String(port), '--host'], env: {} }
     case 'cra':
       // BROWSER=none suppresses react-scripts' default "open a browser tab"
       // behavior, which has no meaning in a headless container.
