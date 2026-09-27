@@ -5,10 +5,13 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
 import {
+  changedFiles,
   checkoutBranch,
   commitPaths,
   discardPaths,
+  EMPTY_TREE_SHA,
   hasRemote,
+  headSha,
   isValidBranchName,
   listBranches,
   listStashes,
@@ -18,6 +21,15 @@ import {
 
 /** A throwaway git repo with one commit and a known identity. */
 function makeRepo(): string {
+  const dir = makeEmptyRepo()
+  writeFileSync(join(dir, 'README.md'), 'hello\n')
+  execFileSync('git', ['-C', dir, 'add', '-A'], { stdio: 'ignore' })
+  execFileSync('git', ['-C', dir, 'commit', '-q', '-m', 'initial'], { stdio: 'ignore' })
+  return dir
+}
+
+/** A throwaway git repo with no commits yet, e.g. straight off `git init`. */
+function makeEmptyRepo(): string {
   const dir = mkdtempSync(join(tmpdir(), 'mce-gitops-'))
   const g = (...args: string[]): void => {
     execFileSync('git', ['-C', dir, ...args], { stdio: 'ignore' })
@@ -25,9 +37,6 @@ function makeRepo(): string {
   g('init', '-q', '-b', 'main')
   g('config', 'user.email', 'test@example.com')
   g('config', 'user.name', 'Test')
-  writeFileSync(join(dir, 'README.md'), 'hello\n')
-  g('add', '-A')
-  g('commit', '-q', '-m', 'initial')
   return dir
 }
 
@@ -147,6 +156,28 @@ test('pushCurrent establishes upstream tracking on first push when origin exists
     { encoding: 'utf8' },
   ).trim()
   assert.equal(upstream, 'origin/main')
+})
+
+test('headSha is undefined for a repo with no commits yet', async () => {
+  const dir = makeEmptyRepo()
+  assert.equal(await headSha(dir), undefined)
+})
+
+test('changedFiles against the empty tree reports a fresh project\'s staged and untracked files', async () => {
+  // Regression: a brand-new project (`git init`, no commits) has no HEAD, so
+  // the Source control drawer used to skip `changedFiles` entirely and show
+  // "No changes" forever — leaving no way to select files and make the first
+  // commit. Diffing against git's well-known empty-tree sha instead should
+  // surface both a staged file and a plain untracked one as newly added.
+  const dir = makeEmptyRepo()
+  writeFileSync(join(dir, 'staged.txt'), 'staged\n')
+  execFileSync('git', ['-C', dir, 'add', 'staged.txt'], { stdio: 'ignore' })
+  writeFileSync(join(dir, 'untracked.txt'), 'untracked\n')
+
+  const files = await changedFiles(dir, EMPTY_TREE_SHA)
+  const paths = files.map((f) => f.path).sort()
+  assert.deepEqual(paths, ['staged.txt', 'untracked.txt'])
+  assert.ok(files.every((f) => f.status === 'added'))
 })
 
 test('stash save/list/pop round-trips', async () => {

@@ -33,6 +33,15 @@ export async function headSha(cwd: string): Promise<string | undefined> {
   return out || undefined
 }
 
+/**
+ * Git's well-known empty-tree object — exists in every repo without being
+ * written. Stands in for `base` when a repo has no commits yet (fresh `git
+ * init`, or cloned from an empty GitHub repo): diffing against it reports
+ * every already-tracked/staged file as newly added, same as `git diff
+ * --cached` would once there's a HEAD to compare instead.
+ */
+export const EMPTY_TREE_SHA = '4b825dc642cb6eb9a060e54bf8d69288fbee4904'
+
 function statusOf(letter: string | undefined): ChangedFile['status'] {
   if (letter === 'A') return 'added'
   if (letter === 'D') return 'deleted'

@@ -570,7 +570,11 @@ export interface FsSearchResponse {
  * no separate diff endpoint, it's the same one the turn-changes accordion uses.
  */
 export interface GitStatusResponse {
-  /** Undefined for a repo with no commits yet — nothing to diff against. */
+  /**
+   * The sha (or git's well-known empty-tree hash, for a repo with no commits
+   * yet) that `files` were diffed against — feed this straight back into the
+   * `changes` route for a per-file diff.
+   */
   base?: string
   files: ChangedFile[]
   /**

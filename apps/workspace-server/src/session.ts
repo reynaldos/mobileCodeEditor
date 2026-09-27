@@ -11,7 +11,7 @@ import { randomUUID } from 'node:crypto'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { AsyncQueue } from './async-queue.ts'
 import { assertAgentCredentials, type Config } from './config.ts'
-import { changedFiles, headSha } from './git-changes.ts'
+import { changedFiles, EMPTY_TREE_SHA, headSha } from './git-changes.ts'
 import type { EventLog } from './log.ts'
 import type { UploadStore } from './uploads.ts'
 
@@ -554,8 +554,10 @@ export class AgentSession {
    * path and best-effort — a git hiccup must never fail a turn.
    */
   async #emitTurnChanges(basePromise?: Promise<string | undefined>): Promise<void> {
-    const base = await basePromise?.catch(() => undefined)
-    if (!base) return
+    if (!basePromise) return
+    // No HEAD at turn start (fresh project, no commits yet) → diff against the
+    // empty tree so the turn's new files still populate the changes accordion.
+    const base = (await basePromise.catch(() => undefined)) ?? EMPTY_TREE_SHA
     const files = await changedFiles(this.#projectPath, base).catch(() => [])
     if (files.length === 0) return
     this.#append({ type: 'turn_changes', base, files })

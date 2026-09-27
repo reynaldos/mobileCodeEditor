@@ -1,6 +1,6 @@
 import type { GitStatusResponse } from '@mce/protocol'
 import type { FastifyInstance } from 'fastify'
-import { changedFiles, hasRemote, headSha, upstreamStatus } from '../git-changes.ts'
+import { changedFiles, EMPTY_TREE_SHA, hasRemote, headSha, upstreamStatus } from '../git-changes.ts'
 import type { ProjectStore } from '../projects.ts'
 
 /**
@@ -18,8 +18,12 @@ export function registerGitStatus(app: FastifyInstance, projects: ProjectStore):
     const cwd = projects.pathOf(projectId)
     if (!cwd || !projects.exists(projectId)) return reply.code(404).send({ error: 'no such project' })
 
-    const base = await headSha(cwd)
-    const files = base ? await changedFiles(cwd, base) : []
+    // No HEAD yet (fresh `git init`, or a clone of a brand-new empty GitHub repo)
+    // → diff against the empty tree so untracked/staged files still show up as
+    // "added" instead of the Changes list silently reporting nothing.
+    const head = await headSha(cwd)
+    const base = head ?? EMPTY_TREE_SHA
+    const files = await changedFiles(cwd, base)
     // Cheap (no network): reflects the last fetch, like `git status`. The
     // refresh endpoint is what fetches to bring these counts up to date.
     const upstream = await upstreamStatus(cwd)
