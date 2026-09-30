@@ -12,7 +12,9 @@ import { setTimeout as sleep } from 'node:timers/promises'
 import { AsyncQueue } from './async-queue.ts'
 import { assertAgentCredentials, type Config } from './config.ts'
 import { changedFiles, headSha } from './git-changes.ts'
+import { discoverLocalPlugins, localPluginsDir } from './local-plugins.ts'
 import type { EventLog } from './log.ts'
+import { readProjectClaudeMd } from './project-memory.ts'
 import type { UploadStore } from './uploads.ts'
 
 /**
@@ -39,6 +41,9 @@ const AUTO_APPROVED = new Set(['Read', 'Grep', 'Glob'])
  * appeared. Auto-approving them is what lets that card update in real time.
  */
 const PLANNING_TOOLS = new Set(['TodoWrite', 'TaskCreate', 'TaskUpdate', 'TaskList'])
+
+const TODO_INSTRUCTION =
+  'For any task that takes more than a couple of steps, call the TodoWrite tool up front to lay out the plan, then keep it updated as you go — mark items in_progress and completed in real time. Prefer a TodoWrite checklist over describing the plan only in prose. Skip it for trivial one- or two-step tasks.'
 
 const SUMMARY_MAX = 200
 
@@ -165,15 +170,14 @@ export class AgentSession {
         // is the preset built into the SDK, not on-disk settings, so it doesn't
         // reintroduce the pre-approvals `settingSources: []` keeps out.
         //
-        // The `append` nudges TodoWrite specifically: even with the preset the
-        // model leans on prose plans (or sub-agents), and the card only renders
-        // off a real TodoWrite/Task* call — so without this it rarely shows.
-        // Scoped to multi-step work so trivial turns stay quiet.
+        // `append` layers in: the TodoWrite nudge (see TODO_INSTRUCTION), the
+        // project's own CLAUDE.md (read directly — see project-memory.ts, since
+        // the SDK's native loader would drag in the project's settings.json
+        // too), and the local-plugin install convention (see local-plugins.ts).
         systemPrompt: {
           type: 'preset',
           preset: 'claude_code',
-          append:
-            'For any task that takes more than a couple of steps, call the TodoWrite tool up front to lay out the plan, then keep it updated as you go — mark items in_progress and completed in real time. Prefer a TodoWrite checklist over describing the plan only in prose. Skip it for trivial one- or two-step tasks.',
+          append: this.#systemPromptAppend(),
         },
         // AskUserQuestion arrives here too, as an ordinary tool_use — confirmed
         // empirically (it was showing up as a JSON approval card before
@@ -183,8 +187,17 @@ export class AgentSession {
         // 'default' is what makes canUseTool get consulted at all.
         permissionMode: 'default',
         // Load no user/project settings. A container should behave identically
-        // everywhere, and stray pre-approvals would silently bypass our cards.
+        // everywhere, and stray pre-approvals would silently bypass our cards —
+        // and doubly so for a project, since that's whatever repo the user
+        // opened: its settings.json could define hooks that run on their own,
+        // no card at all. CLAUDE.md and plugins are threaded in above and below
+        // instead, without opening that door. See project-memory.ts and
+        // local-plugins.ts.
         settingSources: [],
+        // Locally-installed plugins only — one directory per plugin, no
+        // marketplace/trust-dialog flow, nothing settings.json-based. See
+        // local-plugins.ts for why, and how chat installs into that directory.
+        plugins: discoverLocalPlugins(),
         // No token deltas in the log. See DECISIONS #7.
         includePartialMessages: false,
         abortController: this.#abort,
@@ -194,6 +207,18 @@ export class AgentSession {
     })
 
     this.#done = this.#consume()
+  }
+
+  /** TodoWrite nudge, plus the project's CLAUDE.md and the plugin-install convention, if any. */
+  #systemPromptAppend(): string {
+    const claudeMd = readProjectClaudeMd(this.#projectPath)
+    const parts = [
+      TODO_INSTRUCTION,
+      claudeMd &&
+        `The project has a CLAUDE.md at its root — project-specific instructions checked into the repo. Follow them:\n\n${claudeMd}`,
+      `To install a local Claude Code plugin, clone or copy it into a subdirectory of \`${localPluginsDir()}\` (each subdirectory there, containing its own \`.claude-plugin/plugin.json\`, is loaded as a plugin). It takes effect starting the next new chat thread, not this one.`,
+    ]
+    return parts.filter((p): p is string => Boolean(p)).join('\n\n')
   }
 
   /**
