@@ -1,7 +1,7 @@
 import '@xterm/xterm/css/xterm.css'
 import { FitAddon } from '@xterm/addon-fit'
 import { Terminal as Xterm } from '@xterm/xterm'
-import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp } from 'lucide-react'
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, ClipboardPaste } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { terminalSocketUrl } from '../api.ts'
 
@@ -45,6 +45,13 @@ export function Terminal({ projectId }: { projectId: string }): React.JSX.Elemen
   const ctrlRef = useRef(false)
   const [ctrl, setCtrl] = useState(false)
   const [status, setStatus] = useState<'connecting' | 'open' | 'closed'>('connecting')
+  // Paste panel: a real textarea catches the OS paste gesture (long-press /
+  // system menu), which is reliable on mobile — unlike navigator.clipboard's
+  // readText(), which needs a permission prompt that many mobile browsers
+  // never grant. xterm's hidden textarea supports native paste too, but
+  // there's no visible affordance for it, so this button exists to be found.
+  const [pasteOpen, setPasteOpen] = useState(false)
+  const [pasteText, setPasteText] = useState('')
 
   useEffect(() => {
     const container = containerRef.current
@@ -137,6 +144,12 @@ export function Terminal({ projectId }: { projectId: string }): React.JSX.Elemen
     termRef.current?.focus()
   }
 
+  function commitPaste(text: string): void {
+    if (text) sendKey(text)
+    setPasteText('')
+    setPasteOpen(false)
+  }
+
   return (
     // `data-vaul-no-drag` is load-bearing: without it the drawer treats a tap on
     // the terminal as the start of a swipe-to-dismiss drag and swallows the
@@ -158,7 +171,48 @@ export function Terminal({ projectId }: { projectId: string }): React.JSX.Elemen
         className="min-h-0 flex-1 overflow-hidden p-2"
         onPointerDown={() => termRef.current?.focus()}
       />
+      {pasteOpen && (
+        <div className="shrink-0 border-t border-line bg-panel-2 p-2">
+          <textarea
+            className="min-h-16 w-full resize-y rounded-md border border-line bg-panel px-2.5 py-2 font-mono text-[13px] text-fg outline-none focus:border-accent"
+            placeholder="Paste here…"
+            autoCapitalize="none"
+            autoCorrect="off"
+            spellCheck={false}
+            value={pasteText}
+            onChange={(ev) => setPasteText(ev.target.value)}
+            onPaste={(ev) => {
+              const text = ev.clipboardData.getData('text')
+              if (text) {
+                ev.preventDefault()
+                commitPaste(text)
+              }
+            }}
+            autoFocus
+          />
+          <div className="mt-2 flex items-center justify-end gap-2">
+            <button
+              className="rounded-lg px-3 py-1.5 text-[13px] text-muted hover:text-fg"
+              onClick={() => {
+                setPasteText('')
+                setPasteOpen(false)
+                termRef.current?.focus()
+              }}
+            >
+              Cancel
+            </button>
+            <button
+              className="rounded-lg border border-accent bg-accent px-3 py-1.5 text-[13px] font-semibold text-[#06101f] disabled:opacity-50"
+              disabled={!pasteText}
+              onClick={() => commitPaste(pasteText)}
+            >
+              Send
+            </button>
+          </div>
+        </div>
+      )}
       <div className="flex shrink-0 items-center gap-1 overflow-x-auto border-t border-line bg-panel px-2 py-1.5 [scrollbar-width:none]">
+        <SoftKey label="Paste" icon={ClipboardPaste} active={pasteOpen} onClick={() => setPasteOpen((o) => !o)} />
         <SoftKey label="Ctrl" active={ctrl} onClick={toggleCtrl} />
         <SoftKey label="Esc" onClick={() => sendKey('\x1b')} />
         <SoftKey label="Tab" onClick={() => sendKey('\t')} />
