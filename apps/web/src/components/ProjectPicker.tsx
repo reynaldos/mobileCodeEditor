@@ -1,6 +1,6 @@
 import type { GithubRepo, NameCheckResponse, StorageResponse, Visibility } from '@mce/protocol'
 import type { Project } from '@mce/protocol'
-import { Check, Files, Globe, HardDrive, Loader, Lock, Package, Search, Trash2, X } from 'lucide-react'
+import { Check, Files, Globe, HardDrive, Loader, Lock, Package, Search, X } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   ApiError,
@@ -14,6 +14,7 @@ import {
 } from '../api.ts'
 import { useDebounced } from '../useDebounced.ts'
 import { RowMenu } from './RowMenu.tsx'
+import { SwipeToDelete } from './SwipeToDelete.tsx'
 import {
   Dialog,
   DialogClose,
@@ -93,32 +94,37 @@ export function ProjectPicker({
 
       {installErr && <div className="border-b border-line bg-del-bg px-4 py-2 text-[12px] text-del">{installErr}</div>}
 
+      {/* Rows swipe left to reveal Remove (the kebab keeps the non-destructive actions);
+          removal still goes through RemoveDialog's confirm. */}
       <div className="flex-1 overflow-y-auto p-4">
         <ul className="flex flex-col gap-2">
           {projects.map((p) => (
             <li
               key={p.id}
-              className={`group flex items-center rounded-xl border ${
-                p.id === activeId ? 'border-accent bg-panel' : 'border-line bg-panel-2'
-              }`}
+              className={`group overflow-hidden rounded-xl border ${p.id === activeId ? 'border-accent' : 'border-line'}`}
             >
-              <button className="min-w-0 flex-1 p-3 text-left" onClick={() => onSelect(p.id)}>
-                <span className="block truncate font-medium">{p.name}</span>
-                <span className="mt-0.5 block truncate text-[12px] text-muted">
-                  {p.repoUrl ?? 'local'} {p.branch ? `· ${p.branch}` : ''}
+              <SwipeToDelete
+                label={`Remove ${p.name}`}
+                onDelete={() => setRemoving(p)}
+                className={`flex items-center ${p.id === activeId ? 'bg-panel' : 'bg-panel-2'}`}
+              >
+                <button className="min-w-0 flex-1 p-3 text-left" onClick={() => onSelect(p.id)}>
+                  <span className="block truncate font-medium">{p.name}</span>
+                  <span className="mt-0.5 block truncate text-[12px] text-muted">
+                    {p.repoUrl ?? 'local'} {p.branch ? `· ${p.branch}` : ''}
+                  </span>
+                  {failed[p.name] && <div className="mt-1 text-[12px] text-del">{failed[p.name]}</div>}
+                </button>
+                <span className="shrink-0 pr-1.5">
+                  <RowMenu
+                    label={`Actions for ${p.name}`}
+                    actions={[
+                      { key: 'explorer', label: 'Explorer', icon: Files, onClick: () => onOpenExplorer(p.id) },
+                      { key: 'install', label: 'Install dependencies', icon: Package, onClick: () => runInstall(p) },
+                    ]}
+                  />
                 </span>
-                {failed[p.name] && <div className="mt-1 text-[12px] text-del">{failed[p.name]}</div>}
-              </button>
-              <span className="shrink-0 pr-1.5">
-                <RowMenu
-                  label={`Actions for ${p.name}`}
-                  actions={[
-                    { key: 'explorer', label: 'Explorer', icon: Files, onClick: () => onOpenExplorer(p.id) },
-                    { key: 'install', label: 'Install dependencies', icon: Package, onClick: () => runInstall(p) },
-                    { key: 'remove', label: 'Remove project', icon: Trash2, destructive: true, onClick: () => setRemoving(p) },
-                  ]}
-                />
-              </span>
+              </SwipeToDelete>
             </li>
           ))}
           {projects.length === 0 && (
