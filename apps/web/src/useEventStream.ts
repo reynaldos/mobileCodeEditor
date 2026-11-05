@@ -147,10 +147,31 @@ export function useKeyboardInset(): void {
     }
     document.addEventListener('focusout', onFocusOut)
 
+    // `focusout` only fires for a blur. Navigating back in the app while a
+    // search field is focused (picking a thread from the thread list, closing
+    // the explorer drawer) unmounts the input instead, and browsers fire no
+    // blur for a focused node that is simply removed. The keyboard dismisses,
+    // but neither signal above runs, so `--keyboard-inset` stays at the
+    // keyboard's height and the layout sits lifted over a keyboard that is
+    // gone. Watch for the focused element leaving the DOM and treat that as
+    // the blur it should have been.
+    let focused: Element | null = null
+    const onFocusIn = (event: FocusEvent): void => {
+      focused = event.target instanceof Element ? event.target : null
+    }
+    const observer = new MutationObserver(() => {
+      if (!focused || focused.isConnected) return
+      focused = null
+      onFocusOut()
+    })
+    document.addEventListener('focusin', onFocusIn)
+    observer.observe(document.body, { childList: true, subtree: true })
+
     return () => {
       settleTimers.forEach(window.clearTimeout)
       blurTimers.forEach(window.clearTimeout)
       cancelAnimationFrame(rafId)
+      observer.disconnect()
       document.removeEventListener('visibilitychange', updateAll)
       window.removeEventListener('pageshow', updateAll)
       window.removeEventListener('resize', updateAll)
@@ -158,6 +179,7 @@ export function useKeyboardInset(): void {
       viewport?.removeEventListener('resize', updateKeyboardInset)
       viewport?.removeEventListener('scroll', updateKeyboardInset)
       document.removeEventListener('focusout', onFocusOut)
+      document.removeEventListener('focusin', onFocusIn)
     }
   }, [])
 }
