@@ -5,14 +5,17 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
 import {
+  changedFiles,
   checkoutBranch,
   commitPaths,
   discardPaths,
+  EMPTY_TREE,
   isValidBranchName,
   listBranches,
   listStashes,
   pushCurrent,
   stashAction,
+  upstreamStatus,
 } from './git-changes.ts'
 
 /** A throwaway git repo with one commit and a known identity. */
@@ -109,11 +112,53 @@ test('discardPaths refuses an empty selection', async () => {
   assert.equal((await discardPaths(dir, [])).ok, false)
 })
 
-test('pushCurrent reports noUpstream for a branch that tracks no remote', async () => {
-  const dir = makeRepo() // a fresh local repo has no upstream
+test('pushCurrent reports noUpstream for a repo with no remote at all', async () => {
+  const dir = makeRepo() // a fresh local repo has no remote
   const r = await pushCurrent(dir)
   assert.equal(r.ok, false)
   assert.equal(r.noUpstream, true)
+})
+
+/** A bare repo to stand in for GitHub, wired up as `origin` of `dir`. */
+function addBareOrigin(dir: string): string {
+  const origin = mkdtempSync(join(tmpdir(), 'mce-origin-'))
+  execFileSync('git', ['init', '-q', '--bare', origin], { stdio: 'ignore' })
+  execFileSync('git', ['-C', dir, 'remote', 'add', 'origin', origin], { stdio: 'ignore' })
+  return origin
+}
+
+test('pushCurrent publishes a branch that has a remote but no upstream (the fresh-project case)', async () => {
+  const dir = makeRepo()
+  addBareOrigin(dir)
+  assert.equal(await upstreamStatus(dir), undefined, 'precondition: main tracks nothing yet')
+
+  const r = await pushCurrent(dir)
+  assert.equal(r.ok, true, r.stderr)
+  assert.equal(r.published, true)
+  assert.deepEqual(await upstreamStatus(dir), { name: 'origin/main', ahead: 0, behind: 0 })
+
+  // Now it tracks — a second push is a plain push, not a publish.
+  const again = await pushCurrent(dir)
+  assert.equal(again.ok, true)
+  assert.equal(again.published, undefined)
+})
+
+test('a repo with no commits yet still names its branch and lists its files against the empty tree', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'mce-unborn-'))
+  execFileSync('git', ['-C', dir, 'init', '-q', '-b', 'main'], { stdio: 'ignore' })
+  writeFileSync(join(dir, 'index.html'), '<h1>hi</h1>\n')
+
+  assert.equal((await listBranches(dir)).current, 'main')
+  const files = await changedFiles(dir, EMPTY_TREE)
+  assert.deepEqual(
+    files.map((f) => [f.path, f.status]),
+    [['index.html', 'added']],
+  )
+
+  // And the first commit can be made from that listing.
+  execFileSync('git', ['-C', dir, 'config', 'user.email', 'test@example.com'], { stdio: 'ignore' })
+  execFileSync('git', ['-C', dir, 'config', 'user.name', 'Test'], { stdio: 'ignore' })
+  assert.equal((await commitPaths(dir, 'first', ['index.html'])).ok, true)
 })
 
 test('stash save/list/pop round-trips', async () => {

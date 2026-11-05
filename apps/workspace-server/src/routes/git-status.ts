@@ -1,6 +1,6 @@
 import type { GitStatusResponse } from '@mce/protocol'
 import type { FastifyInstance } from 'fastify'
-import { changedFiles, headSha, upstreamStatus } from '../git-changes.ts'
+import { changedFiles, EMPTY_TREE, headSha, remoteUrl, upstreamStatus } from '../git-changes.ts'
 import type { ProjectStore } from '../projects.ts'
 
 /**
@@ -18,11 +18,19 @@ export function registerGitStatus(app: FastifyInstance, projects: ProjectStore):
     const cwd = projects.pathOf(projectId)
     if (!cwd || !projects.exists(projectId)) return reply.code(404).send({ error: 'no such project' })
 
-    const base = await headSha(cwd)
-    const files = base ? await changedFiles(cwd, base) : []
+    // No HEAD yet (a repo the app just created) diffs against the empty tree,
+    // so its files show up and the first commit can be made from here.
+    const base = (await headSha(cwd)) ?? EMPTY_TREE
+    const files = await changedFiles(cwd, base)
     // Cheap (no network): reflects the last fetch, like `git status`. The
     // refresh endpoint is what fetches to bring these counts up to date.
     const upstream = await upstreamStatus(cwd)
-    return reply.send({ base, files, ...(upstream ? { upstream } : {}) } satisfies GitStatusResponse)
+    const remote = await remoteUrl(cwd)
+    return reply.send({
+      base,
+      files,
+      ...(remote ? { remote } : {}),
+      ...(upstream ? { upstream } : {}),
+    } satisfies GitStatusResponse)
   })
 }

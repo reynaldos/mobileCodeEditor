@@ -21,6 +21,7 @@ import {
   Plus,
   RotateCw,
   Trash2,
+  Upload,
 } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import {
@@ -31,6 +32,7 @@ import {
   fetchFileDiff,
   fetchGitStatus,
   fetchStashes,
+  publishBranch,
   refreshBranch,
   stashOp,
 } from '../api.ts'
@@ -116,6 +118,10 @@ export function SourceControlView({ projectId, onOpenFile, onGitChange, onCommit
   const dirty = files.length > 0
   const allSelected = dirty && selected.size === files.length
   const canCommit = dirty && allSelected && message.trim().length > 0 && !busy
+  // What the commit button will do after the commit: push to the upstream,
+  // publish the branch to the remote (first push of a new project or branch),
+  // or nothing (no remote at all).
+  const afterCommit: 'push' | 'publish' | 'local' = status?.upstream ? 'push' : status?.remote ? 'publish' : 'local'
 
   function toggleSection(id: SectionId): void {
     setOpen((cur) => (cur === id ? null : id))
@@ -172,7 +178,9 @@ export function SourceControlView({ projectId, onOpenFile, onGitChange, onCommit
       await Promise.all([loadStatus(), loadBranches()])
       onGitChange?.() // branch ahead/behind moved — refresh the header's branch subtitle
       const pushNote = res.pushed
-        ? ` and pushed to ${res.branch ?? 'the remote'}`
+        ? res.published
+          ? ` and published ${res.branch ?? 'the branch'} to the remote`
+          : ` and pushed to ${res.branch ?? 'the remote'}`
         : res.pushSkipped
           ? ' (no remote — local only)'
           : res.pushError
@@ -237,6 +245,17 @@ export function SourceControlView({ projectId, onOpenFile, onGitChange, onCommit
     } finally {
       setRefreshing(false)
     }
+  }
+
+  async function onPublish(): Promise<void> {
+    const ok = await runOp(
+      () => publishBranch(projectId),
+      async () => {
+        await Promise.all([loadStatus(), loadBranches()])
+        onGitChange?.() // the branch now tracks a remote — refresh the header's branch subtitle
+      },
+    )
+    if (ok) setNotice(`Published ${branches?.current ?? 'the branch'} to the remote.`)
   }
 
   if (error) return <p className="p-4 text-center text-[13px] text-del">Could not load git status.</p>
@@ -345,12 +364,10 @@ export function SourceControlView({ projectId, onOpenFile, onGitChange, onCommit
               >
                 {busy ? <Loader className="size-4 animate-spin" /> : null}
                 {allSelected
-                  ? `Commit & push ${files.length} file${files.length === 1 ? '' : 's'}`
+                  ? `${COMMIT_LABEL[afterCommit]} ${files.length} file${files.length === 1 ? '' : 's'}`
                   : 'Review every file to commit'}
               </button>
-              <p className="text-center text-[11px] text-muted">
-                Commits the reviewed files and pushes to the branch’s remote, then tells the agent it’s done.
-              </p>
+              <p className="text-center text-[11px] text-muted">{COMMIT_HINT[afterCommit]}</p>
             </div>
           </>
         ) : (
@@ -369,7 +386,7 @@ export function SourceControlView({ projectId, onOpenFile, onGitChange, onCommit
         summary={<span className="truncate font-mono text-[12px] text-fg">{branches?.current ?? '…'}</span>}
       >
         <BranchList branches={branches} busy={busy} onCheckout={(b, create) => void onCheckout(b, create)} />
-        {status.upstream && (
+        {status.upstream ? (
           <BranchSync
             upstream={status.upstream}
             dirty={dirty}
@@ -377,6 +394,8 @@ export function SourceControlView({ projectId, onOpenFile, onGitChange, onCommit
             notice={notice}
             onRefresh={() => void onRefresh()}
           />
+        ) : (
+          <PublishRow remote={status.remote} current={branches?.current} busy={busy} onPublish={() => void onPublish()} />
         )}
       </Section>
 
@@ -713,6 +732,51 @@ function BranchSync({
   )
 }
 
+/** The commit button's verb, by what follows the commit (see `afterCommit`). */
+const COMMIT_LABEL = { push: 'Commit & push', publish: 'Commit & publish', local: 'Commit' } as const
+const COMMIT_HINT = {
+  push: 'Commits the reviewed files and pushes to the branch’s remote, then tells the agent it’s done.',
+  publish: 'Commits the reviewed files and publishes this branch to the remote, then tells the agent it’s done.',
+  local: 'Commits the reviewed files on this device (no git remote), then tells the agent it’s done.',
+} as const
+
+/**
+ * Stands in for the sync row when the branch tracks no remote: a project the
+ * app just created, or a branch made here. With a remote, offers Publish
+ * (`git push -u`); without one, says so instead of pretending a push happened.
+ */
+function PublishRow({
+  remote,
+  current,
+  busy,
+  onPublish,
+}: {
+  remote: string | undefined
+  current: string | undefined
+  busy: boolean
+  onPublish: () => void
+}): React.JSX.Element {
+  return (
+    <div className="shrink-0 border-t border-line px-3 py-2.5">
+      <div className="flex items-center gap-2">
+        <Upload className="size-3.5 shrink-0 text-muted" />
+        <span className="min-w-0 flex-1 truncate text-[12px] text-muted">
+          {remote ? `${current ?? 'This branch'} isn’t on the remote yet` : 'No git remote — commits stay on this device'}
+        </span>
+        {remote && (
+          <button
+            className="flex shrink-0 items-center gap-1.5 rounded-lg border border-line px-2.5 py-1 text-[12px] text-fg hover:bg-panel-2 disabled:opacity-50"
+            disabled={busy}
+            onClick={onPublish}
+          >
+            {busy ? 'Publishing…' : 'Publish'}
+          </button>
+        )}
+      </div>
+    </div>
+  )
+}
+
 const STATUS_LABEL: Record<ChangedFile['status'], string> = { added: 'A', modified: 'M', deleted: 'D', renamed: 'R' }
 const STATUS_COLOR: Record<ChangedFile['status'], string> = {
   added: 'text-add',
@@ -726,8 +790,12 @@ const sumFiles = (files: ChangedFile[], key: 'additions' | 'deletions'): number 
 /** The message sent to the thread's agent after the user commits from Source control. */
 function commitSummary(message: string, paths: string[], res: GitCommitResponse): string {
   const action = res.pushed
-    ? `committed and pushed to \`${res.branch ?? 'the current branch'}\``
-    : 'committed (local only — not pushed)'
+    ? res.published
+      ? `committed and published \`${res.branch ?? 'the current branch'}\` to the remote`
+      : `committed and pushed to \`${res.branch ?? 'the current branch'}\``
+    : res.pushSkipped
+      ? 'committed (this project has no git remote, so it stays local)'
+      : 'committed (local only — not pushed)'
   const list = paths.length <= 8 ? paths.join(', ') : `${paths.slice(0, 8).join(', ')}, +${paths.length - 8} more`
   const pushWarn = res.pushError ? ` The push failed (${res.pushError}), so the commit is local for now.` : ''
   return (

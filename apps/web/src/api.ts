@@ -483,9 +483,14 @@ export async function stashOp(projectId: string, req: GitStashRequest): Promise<
   return (await post<GitOpResponse>(gitPath(projectId, 'stash'), req))!
 }
 
-/** Stage + commit the given paths, then push to the branch's upstream (best-effort — see `GitCommitResponse`). */
+/** Stage + commit the given paths, then push (publishing the branch if it has a remote but no upstream; best-effort — see `GitCommitResponse`). */
 export async function commitFiles(projectId: string, message: string, paths: string[]): Promise<GitCommitResponse> {
   return (await post<GitCommitResponse>(gitPath(projectId, 'commit'), { message, paths } satisfies GitCommitRequest))!
+}
+
+/** Push the current branch to `origin`, setting it as upstream when it tracks nothing yet. `ok:false` carries a git error message. */
+export async function publishBranch(projectId: string): Promise<GitOpResponse> {
+  return (await post<GitOpResponse>(gitPath(projectId, 'publish'), {}))!
 }
 
 /** Discard working-tree changes for the given paths (restore to HEAD). Destructive. `ok:false` carries a git error message. */

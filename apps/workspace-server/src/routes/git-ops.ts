@@ -103,16 +103,32 @@ export function registerGitOps(app: FastifyInstance, projects: ProjectStore): vo
     const committed = await commitPaths(cwd, message, paths)
     if (!committed.ok) return reply.send({ ok: false, error: cleanGitError(committed.stderr) } satisfies GitCommitResponse)
 
-    // Push is a best-effort follow-on — a failure (or no upstream) leaves the
-    // commit in place and is reported separately so the client can say so.
+    // Push is a best-effort follow-on — a failure (or no remote) leaves the
+    // commit in place and is reported separately so the client can say so. A
+    // branch with a remote but no upstream gets published (`push -u`).
     const { current } = await listBranches(cwd)
     const push = await pushCurrent(cwd)
     const pushResult = push.noUpstream
       ? { pushSkipped: true }
       : push.ok
-        ? { pushed: true }
+        ? { pushed: true, ...(push.published ? { published: true } : {}) }
         : { pushError: cleanGitError(push.stderr) }
     return reply.send({ ok: true, branch: current, ...pushResult } satisfies GitCommitResponse)
+  })
+
+  // Publish the current branch to `origin` (or push commits it already has).
+  // For a branch committed while offline, or a repo whose remote was added after
+  // its first commits.
+  app.post('/api/projects/:projectId/git/publish', async (request, reply) => {
+    const { projectId } = request.params as { projectId: string }
+    const cwd = cwdOr404(projectId, reply)
+    if (!cwd) return reply
+
+    const push = await pushCurrent(cwd)
+    if (push.noUpstream) {
+      return reply.send({ ok: false, error: 'This project has no git remote to publish to.' } satisfies GitOpResponse)
+    }
+    return reply.send({ ok: push.ok, ...(push.ok ? {} : { error: cleanGitError(push.stderr) }) } satisfies GitOpResponse)
   })
 
   app.post('/api/projects/:projectId/git/discard', async (request, reply) => {

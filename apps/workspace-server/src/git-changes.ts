@@ -6,6 +6,13 @@ import type { ChangedFile, GitStashEntry } from '@mce/protocol'
 
 const run = promisify(execFile)
 
+/**
+ * git's well-known empty tree. The diff base for a repo with no commits yet, so
+ * a project the app just created (`git init`, or a clone of a brand-new GitHub
+ * repo) still lists its files as changes and can make its first commit.
+ */
+export const EMPTY_TREE = '4b825dc642cb6eb9a060e54bf8d69288fbee4904'
+
 /** Best-effort git; returns '' on any failure so callers stay simple. */
 async function git(cwd: string, args: string[]): Promise<string> {
   try {
@@ -30,6 +37,12 @@ async function tryGit(cwd: string, args: string[], timeoutMs?: number): Promise<
 /** Current HEAD, captured at turn start so we can diff what a turn changed. */
 export async function headSha(cwd: string): Promise<string | undefined> {
   const out = (await git(cwd, ['rev-parse', 'HEAD'])).trim()
+  return out || undefined
+}
+
+/** `origin`'s URL, or undefined when the repo has no remote. No network. */
+export async function remoteUrl(cwd: string): Promise<string | undefined> {
+  const out = (await git(cwd, ['remote', 'get-url', 'origin'])).trim()
   return out || undefined
 }
 
@@ -121,9 +134,11 @@ export async function fastForwardToUpstream(cwd: string): Promise<'ok' | 'diverg
 
 /** The current branch (or a short sha in detached HEAD) plus the local branches, sorted. */
 export async function listBranches(cwd: string): Promise<{ current: string; branches: string[] }> {
-  const head = (await git(cwd, ['rev-parse', '--abbrev-ref', 'HEAD'])).trim()
-  // Detached HEAD reports "HEAD"; fall back to a short sha so the UI shows something real.
-  const current = head && head !== 'HEAD' ? head : (await git(cwd, ['rev-parse', '--short', 'HEAD'])).trim()
+  // `symbolic-ref` names the branch even before its first commit (an unborn
+  // branch has no sha for `rev-parse` to resolve). It fails on a detached HEAD;
+  // fall back to a short sha so the UI shows something real.
+  const head = (await git(cwd, ['symbolic-ref', '--short', '-q', 'HEAD'])).trim()
+  const current = head || (await git(cwd, ['rev-parse', '--short', 'HEAD'])).trim()
   const out = await git(cwd, ['for-each-ref', '--format=%(refname:short)', 'refs/heads'])
   const branches = out
     .split('\n')
@@ -188,15 +203,27 @@ export async function commitPaths(cwd: string, message: string, paths: string[])
 }
 
 /**
- * Push the current branch to its upstream. Best-effort follow-on to a commit:
- * needs an upstream (returns `noUpstream` if the branch tracks no remote) and
- * network, so it's reported separately and a failure never undoes the commit.
+ * Push the current branch. Best-effort follow-on to a commit: needs network,
+ * so it's reported separately and a failure never undoes the commit.
+ *
+ * A branch with no upstream is the normal state of a project the app created
+ * (`git init`, or a clone of a brand-new GitHub repo, where even the first
+ * commit has nothing to track) and of any branch made locally. When `origin`
+ * exists, publish the branch there (`push -u`) so it tracks from then on;
+ * `published` says that happened. `noUpstream` is only for a repo with no
+ * remote at all.
  */
-export async function pushCurrent(cwd: string): Promise<{ ok: boolean; stderr: string; noUpstream?: boolean }> {
+export async function pushCurrent(
+  cwd: string,
+): Promise<{ ok: boolean; stderr: string; noUpstream?: boolean; published?: boolean }> {
   const upstream = await upstreamStatus(cwd)
-  if (!upstream) return { ok: false, stderr: '', noUpstream: true }
-  const r = await tryGit(cwd, ['push'], 30_000)
-  return { ok: r.ok, stderr: r.stderr }
+  if (upstream) {
+    const r = await tryGit(cwd, ['push'], 30_000)
+    return { ok: r.ok, stderr: r.stderr }
+  }
+  if (!(await remoteUrl(cwd))) return { ok: false, stderr: '', noUpstream: true }
+  const r = await tryGit(cwd, ['push', '-u', 'origin', 'HEAD'], 30_000)
+  return { ok: r.ok, stderr: r.stderr, ...(r.ok ? { published: true } : {}) }
 }
 
 /**

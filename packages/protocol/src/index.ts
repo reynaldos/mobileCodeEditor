@@ -577,9 +577,11 @@ export interface FsSearchResponse {
  * no separate diff endpoint, it's the same one the turn-changes accordion uses.
  */
 export interface GitStatusResponse {
-  /** Undefined for a repo with no commits yet — nothing to diff against. */
-  base?: string
+  /** HEAD, or git's empty tree for a repo with no commits yet (so its files still diff and the first commit can be made). */
+  base: string
   files: ChangedFile[]
+  /** `origin`'s URL. Present when the repo has a remote, even if the current branch doesn't track it yet. */
+  remote?: string
   /**
    * Upstream tracking state, present only when the branch tracks a remote.
    * `ahead`/`behind` are counted against the *last-fetched* upstream ref — no
@@ -710,7 +712,9 @@ export interface GitCommitResponse {
   error?: string
   /** Pushed to the branch's upstream. */
   pushed?: boolean
-  /** No upstream to push to — the commit is local only. */
+  /** With `pushed`: the branch had no upstream, so this push also published it (`push -u`). */
+  published?: boolean
+  /** No remote to push to — the commit is local only. */
   pushSkipped?: boolean
   /** The push was attempted and failed; the commit still landed locally. */
   pushError?: string

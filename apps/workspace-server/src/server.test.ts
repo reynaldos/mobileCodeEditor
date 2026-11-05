@@ -716,16 +716,21 @@ test('GET /api/projects/:id/git/status lists an uncommitted change against HEAD'
   assert.deepEqual(body.files, [{ path: 'a.txt', additions: 1, deletions: 0, status: 'modified' }])
 })
 
-test('GET /api/projects/:id/git/status on a repo with no commits yet reports no base and no files', async () => {
+test('GET /api/projects/:id/git/status on a repo with no commits yet diffs against the empty tree so its files show', async () => {
   const root = mkdtempSync(join(tmpdir(), 'mce-proot-'))
   const dir = join(root, 'app')
   mkdirSync(dir)
   execFileSync('git', ['-C', dir, 'init', '-q', '-b', 'main'])
+  writeFileSync(join(dir, 'index.html'), '<h1>hi</h1>\n')
 
   const { base } = await boot({ ...DEV, projectsRoot: root })
   const res = await fetch(`${base}/api/projects/app/git/status`)
   assert.equal(res.status, 200)
-  const body = (await res.json()) as { base?: string; files: unknown[] }
-  assert.equal(body.base, undefined)
-  assert.deepEqual(body.files, [])
+  const body = (await res.json()) as { base: string; files: { path: string; status: string }[]; remote?: string }
+  assert.equal(body.base, '4b825dc642cb6eb9a060e54bf8d69288fbee4904', 'git’s empty tree stands in for a missing HEAD')
+  assert.deepEqual(
+    body.files.map((f) => [f.path, f.status]),
+    [['index.html', 'added']],
+  )
+  assert.equal(body.remote, undefined, 'a plain git init has no remote')
 })
