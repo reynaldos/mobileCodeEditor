@@ -76,16 +76,13 @@ body {
 
 /*
  * A pending approval blocks the agent, and the SDK gives permission prompts no
- * deadline. If the card can scroll out of reach, the UI can hang the agent. So it
- * sticks to the bottom of the scrollport until answered, and its diff scrolls
- * within itself rather than pushing the buttons off-screen.
+ * deadline. It used to stick to the bottom of the scrollport so it could never
+ * scroll out of reach, but a card with a diff is most of a phone screen, and
+ * stuck there it hid the thread. Now it scrolls with the conversation like any
+ * row; MessageList shows a small "Approval needed" pill whenever the card is
+ * off-screen, which jumps back to it. The diff still scrolls within itself so
+ * the buttons stay under the thumb.
  */
-.approval-pending {
-  position: sticky;
-  bottom: 0;
-  z-index: 2;
-  box-shadow: 0 -14px 28px -14px #000c;
-}
 .approval-pending .scroll-cap {
   max-height: 40dvh;
   overflow-y: auto;

@@ -1,4 +1,4 @@
-import { Bot, Check, Copy, MoreHorizontal } from 'lucide-react'
+import { ArrowDown, Bot, Check, Copy, MoreHorizontal } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { imageUrl } from '../api.ts'
 import { formatDuration, groupTools, type AgentState, type Item, type Todo, type ToolGroup } from '../events.ts'
@@ -64,10 +64,18 @@ export function MessageList({ items, projectId, agent, onViewFile }: Props): Rea
   const pendingKey = items.find(
     (i) => (i.kind === 'approval' || i.kind === 'question') && i.status === 'pending',
   )?.key
+  // Whether the pending card is scrolled out of view. The card is an ordinary
+  // row now (it used to be sticky and covered the thread), so this is what
+  // keeps it reachable: while it's off-screen a pill offers a jump back.
+  const [pendingHidden, setPendingHidden] = useState(false)
 
   function onScroll(): void {
     const el = scroller.current
     if (el) atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < BOTTOM_THRESHOLD
+  }
+
+  function pendingCard(): Element | null {
+    return scroller.current?.querySelector('.approval-pending') ?? null
   }
 
   useEffect(() => {
@@ -81,6 +89,21 @@ export function MessageList({ items, projectId, agent, onViewFile }: Props): Rea
       bottom.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
     }
   }, [items.length, pendingKey])
+
+  useEffect(() => {
+    const card = pendingKey ? pendingCard() : null
+    if (!card || !scroller.current) {
+      setPendingHidden(false)
+      return
+    }
+    const observer = new IntersectionObserver(([entry]) => setPendingHidden(entry ? !entry.isIntersecting : false), {
+      root: scroller.current,
+      // Count the card as visible once any of its buttons could be on screen.
+      threshold: 0.2,
+    })
+    observer.observe(card)
+    return () => observer.disconnect()
+  }, [pendingKey])
 
   // The initial-fetch beat: right after a prompt is sent, while we wait on the
   // agent's first output. Show a single pulsing bubble so that latency doesn't
@@ -110,6 +133,16 @@ export function MessageList({ items, projectId, agent, onViewFile }: Props): Rea
       )}
       {waiting && <TypingBubble />}
       <div ref={bottom} />
+      {pendingHidden && (
+        <button
+          type="button"
+          className="sticky bottom-0 z-[2] mx-auto flex items-center gap-1.5 rounded-full border border-warn bg-panel px-3 py-1.5 text-[12px] font-medium text-warn shadow-[0_6px_20px_-6px_#000c]"
+          onClick={() => pendingCard()?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })}
+        >
+          <ArrowDown className="size-3.5" />
+          Approval needed
+        </button>
+      )}
     </div>
   )
 }

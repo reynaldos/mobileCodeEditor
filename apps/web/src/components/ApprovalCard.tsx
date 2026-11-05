@@ -14,7 +14,7 @@ const VERDICT: Record<Approval['status'], string> = {
   expired: 'Expired — the server restarted before you answered',
 }
 
-/** `approval-pending` is not decoration: it makes the card sticky. See styles.css. */
+/** `approval-pending` is not decoration: it caps the diff height and is how MessageList finds the card. See styles.css. */
 const STATUS: Record<Approval['status'], string> = {
   pending: 'approval-pending border-warn bg-panel',
   allowed: 'border-line bg-panel opacity-70',
