@@ -48,6 +48,17 @@ test('a user_prompt with no images leaves the field absent, not an empty array',
   assert.equal(item?.kind === 'user' ? item.images : undefined, undefined)
 })
 
+test('a hidden user_prompt still wakes the agent but renders no row', () => {
+  const state = run([
+    { type: 'user_prompt', text: 'fix it' },
+    { type: 'user_prompt', text: '[Source control] I committed 1 file', hidden: true },
+    { type: 'assistant_text', text: 'Noted.' },
+  ])
+
+  assert.deepEqual(kinds(state), ['user', 'assistant'])
+  assert.equal(view(state).agent, 'thinking')
+})
+
 test('tool_result finds its tool_use even with items appended in between', () => {
   const state = run([
     { type: 'tool_use', toolUseId: 't1', name: 'Grep', input: {} },

@@ -204,8 +204,12 @@ export class AgentSession {
    * `user_prompt` event with nothing actually sent to Claude. The event only
    * ever stores lightweight refs (id/mediaType/size); the bytes themselves
    * never enter the log. See UploadStore and DECISIONS #5.
+   *
+   * `hidden` flags an app-authored note (the Source control commit summary):
+   * logged and sent to Claude like any prompt, but the UI leaves it out of the
+   * thread.
    */
-  prompt(text: string, imageIds: string[] = []): void {
+  prompt(text: string, imageIds: string[] = [], hidden = false): void {
     if (!this.#query) throw new Error('session not started')
     if (this.#queue.closed) throw new Error('session is closing')
 
@@ -215,7 +219,7 @@ export class AgentSession {
     // recap folded in ahead of it, but only on the first prompt of a recapped
     // thread, so it has context without a native resume. See PHASE-2.5.
     const refs: ImageRef[] = images.map(({ id, mediaType, bytes }) => ({ id, mediaType, size: bytes.length }))
-    this.#append({ type: 'user_prompt', text, ...(refs.length ? { images: refs } : {}) })
+    this.#append({ type: 'user_prompt', text, ...(refs.length ? { images: refs } : {}), ...(hidden ? { hidden: true } : {}) })
     const toClaude = this.#recap ? `${this.#recap}\n\n---\n\n${text}` : text
     this.#recap = undefined
 

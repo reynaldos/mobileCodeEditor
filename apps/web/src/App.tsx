@@ -327,9 +327,10 @@ export function App(): React.JSX.Element {
             onCommitted={(summary) => {
               // Tell the agent the commit happened — but only when Source control is
               // open for the project whose conversation is on screen, and that
-              // thread is a live one (not the read-only legacy bucket).
+              // thread is a live one (not the read-only legacy bucket). Hidden:
+              // the agent reads it, the thread never shows it.
               if (explorerProjectId && explorerProjectId === activeProjectId && activeThreadId && !isLegacy) {
-                void sendPrompt(summary, explorerProjectId, activeThreadId).catch(() => undefined)
+                void sendPrompt(summary, explorerProjectId, activeThreadId, [], true).catch(() => undefined)
               }
             }}
           />

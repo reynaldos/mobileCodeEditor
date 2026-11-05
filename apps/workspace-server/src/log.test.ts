@@ -172,3 +172,13 @@ test('referencedImageIds is empty when nothing has ever attached an image', () =
   text(log, 'just chatting')
   assert.deepEqual(log.referencedImageIds(), new Set())
 })
+
+test('threadsOf titles a thread from its first VISIBLE prompt — a hidden app note never titles it', () => {
+  const log = freshLog()
+  log.append({ sessionId: 's1', projectId: 'p', threadId: 't1', ts: 1, type: 'user_prompt', text: '[Source control] I committed 1 file', hidden: true })
+  log.append({ sessionId: 's1', projectId: 'p', threadId: 't1', ts: 2, type: 'user_prompt', text: 'please fix the login bug' })
+
+  const [thread] = log.threadsOf('p')
+  assert.equal(thread?.title, 'Fix the login bug')
+  assert.equal(thread?.messageCount, 2, 'the hidden note is still an event in the thread')
+})

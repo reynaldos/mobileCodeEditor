@@ -33,7 +33,12 @@ export type ApiKeySource = 'user' | 'project' | 'org' | 'temporary' | 'oauth'
 export type EventBody =
   /** The agent came up. `claudeSessionId` is what we pass to `resume` after a crash. */
   | { type: 'session_started'; claudeSessionId: string; model: string; apiKeySource?: ApiKeySource }
-  | { type: 'user_prompt'; text: string; images?: ImageRef[] }
+  /**
+   * `hidden` marks a note the app itself sends the agent on the user's behalf
+   * (the Source control commit summary). It still reaches Claude and stays in
+   * the log, but the thread UI does not render it and it never titles a thread.
+   */
+  | { type: 'user_prompt'; text: string; images?: ImageRef[]; hidden?: boolean }
   /** A complete assistant message. Never a token delta — see DECISIONS #7. */
   | { type: 'assistant_text'; text: string }
   /**
@@ -186,6 +191,8 @@ export interface PromptRequest {
   fresh?: boolean
   /** Ids from a prior POST /api/uploads/images, attached to this prompt. */
   imageIds?: string[]
+  /** The app authored this on the user's behalf — feed the agent, but keep it out of the thread UI. */
+  hidden?: boolean
 }
 
 /** 202 Accepted. Everything that happens next arrives over SSE. */

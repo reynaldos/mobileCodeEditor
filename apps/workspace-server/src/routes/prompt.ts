@@ -16,6 +16,7 @@ export function registerPrompt(app: FastifyInstance, sessions: SessionManager): 
     const imageIds = Array.isArray(body?.imageIds)
       ? body.imageIds.filter((v): v is string => typeof v === 'string')
       : []
+    const hidden = body?.hidden === true
 
     if (!text) return reply.code(400).send({ error: 'text is required' })
     if (!projectId) return reply.code(400).send({ error: 'projectId is required' })
@@ -25,7 +26,7 @@ export function registerPrompt(app: FastifyInstance, sessions: SessionManager): 
     }
 
     try {
-      const sessionId = await sessions.prompt(projectId, threadId, text, imageIds)
+      const sessionId = await sessions.prompt(projectId, threadId, text, imageIds, hidden)
       return reply.code(202).send({ sessionId } satisfies PromptResponse)
     } catch (err) {
       if (err instanceof UnknownProjectError) {

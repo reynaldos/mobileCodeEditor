@@ -252,7 +252,11 @@ function reduceProject(state: ProjectState, event: Event): ProjectState {
         todoAt: null,
         tasks: [],
         taskTools: {},
-        items: [...state.items, { kind: 'user', key, text: event.text, ...(event.images ? { images: event.images } : {}) }],
+        // A hidden prompt (the app's own note to the agent) is not a row —
+        // the agent's reply to it still is.
+        items: event.hidden
+          ? state.items
+          : [...state.items, { kind: 'user', key, text: event.text, ...(event.images ? { images: event.images } : {}) }],
       }
 
     case 'assistant_text':

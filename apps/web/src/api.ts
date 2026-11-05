@@ -123,18 +123,20 @@ async function post<T>(path: string, body: unknown): Promise<T | undefined> {
   return (await response.json()) as T
 }
 
-/** 202. The answer arrives over SSE, not in this response. */
+/** 202. The answer arrives over SSE, not in this response. `hidden` keeps an app-authored note out of the thread UI. */
 export async function sendPrompt(
   text: string,
   projectId: string,
   threadId: string,
   imageIds: string[] = [],
+  hidden = false,
 ): Promise<PromptResponse> {
   return (await post<PromptResponse>('/api/prompt', {
     text,
     projectId,
     threadId,
     ...(imageIds.length ? { imageIds } : {}),
+    ...(hidden ? { hidden: true } : {}),
   } satisfies PromptRequest))!
 }
 

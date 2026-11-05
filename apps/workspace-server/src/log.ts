@@ -258,6 +258,8 @@ export class EventLog {
            FROM events
           WHERE project_id = ? AND type = 'user_prompt'
             AND thread_id IS ${threadId === null ? 'NULL' : '?'}
+            -- App-authored notes (hidden) never title a thread.
+            AND COALESCE(json_extract(payload, '$.hidden'), 0) = 0
           ORDER BY seq ASC LIMIT 1`,
       )
       .get(...(threadId === null ? [projectId] : [projectId, threadId])) as { text: string | null } | undefined
